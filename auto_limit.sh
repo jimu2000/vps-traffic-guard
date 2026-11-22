@@ -1,12 +1,13 @@
 #!/bin/bash
 # ============================================================================
-# auto_limit.sh — VPS 流量卫士（出站流量监控 + 超限自动限速）
+# auto_limit.sh — VPS 流量卫士（出站流量监控 + 超限处理）
 #
 # 工作原理：
 #   每 10 分钟读取网卡出站流量（tx_bytes），达到阈值时推送 Bark 提醒，
-#   超过限速阈值时用 tc 把网卡限速到指定值。
+#   超过超限阈值时按 OVER_LIMIT_MODE 执行（0=阻断断网，1=限速不断网）。
 #
-#   ⚠️ 限速 ≠ 断网：触发限速后，服务器只是变慢（默认 200 KB/s），
+#   模式 0 阻断断网：iptables 熔断，切断外网出站，SSH 逃生门保留。
+#   模式 1 限速不断网：tc 限流到 RATE_LIMIT，服务器只是变慢（默认 200 KB/s），
 #   SSH 照常能连，不会把自己锁在外面。想恢复全速，删除限速规则即可：
 #       tc qdisc del dev <网卡> root
 #
@@ -38,6 +39,15 @@ LIMIT_GB=200
 # 限速目标：触发限速后网卡出站速度（1600kbit ≈ 200 KB/s）
 # 例：想限到 1Mbps，改成 "1mbit"；想限到 100KB/s，改成 "800kbit"
 RATE_LIMIT="1600kbit"
+
+# 超限处理模式：流量达到 LIMIT_GB 后怎么办（改一个数字就行）
+#   0 = 阻断断网（iptables 熔断：切断外网出站，SSH 逃生门保留，怕扣费选这个）
+#   1 = 限速不断网（tc 限流到 RATE_LIMIT，SSH 与服务都不掉线，怕断网选这个）
+OVER_LIMIT_MODE=1
+
+# SSH 逃生端口：仅阻断模式（OVER_LIMIT_MODE=0）生效，熔断时放行这个端口
+# 改成你自己的 SSH 端口，填错了阻断后连不上！
+SSH_PORT=14422
 
 # ============================================================================
 # ★★★ Bark 推送配置 ★★★
@@ -77,6 +87,30 @@ bark_enc() {
     _json=$(python3 -c 'import json,sys; print(json.dumps({"title":sys.argv[1],"body":sys.argv[2],"sound":sys.argv[3]}, ensure_ascii=False))' "$_title" "$_body" "$_sound") || return 1
     _ct=$(printf '%s' "$_json" | openssl enc -aes-256-cbc -K "$_key_hex" -iv "$_iv_hex" | base64 -w 0) || return 1
     curl -s --max-time 10 -X POST "$BARK_SERVER/$BARK_KEY/" --data-urlencode "ciphertext=$_ct" --data-urlencode "iv=$_iv" > /dev/null 2>&1
+}
+
+# ---------- 阻断模式（iptables 熔断，仅 OVER_LIMIT_MODE=0 时用） ----------
+ensure_chain() {
+    iptables -N TRAFFIC_GUARD 2>/dev/null || true
+    if ! iptables -C OUTPUT -j TRAFFIC_GUARD 2>/dev/null; then
+        iptables -I OUTPUT 1 -j TRAFFIC_GUARD
+    fi
+}
+
+is_circuit_broken() {
+    iptables -L TRAFFIC_GUARD -n -v 2>/dev/null | grep -q "DROP"
+}
+
+trip_circuit_breaker() {
+    ensure_chain
+    iptables -F TRAFFIC_GUARD
+    iptables -A TRAFFIC_GUARD -o lo -j ACCEPT
+    iptables -A TRAFFIC_GUARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A TRAFFIC_GUARD -p tcp --sport "$SSH_PORT" -j ACCEPT
+    iptables -A TRAFFIC_GUARD -d 10.0.0.0/8 -j ACCEPT
+    iptables -A TRAFFIC_GUARD -d 172.16.0.0/12 -j ACCEPT
+    iptables -A TRAFFIC_GUARD -d 192.168.0.0/16 -j ACCEPT
+    iptables -A TRAFFIC_GUARD -o "$INTERFACE" -j DROP
 }
 
 # ---------- 网卡自动识别 ----------
@@ -130,21 +164,36 @@ if [ -f "$STAT_FILE" ]; then
         [ -n "$C_NAME" ] && [ -n "$CI_NAME" ] && GEO_RESULT="$C_NAME ($CI_NAME)"
     fi
 
-    # --- 1. 检查是否达到限速阈值（限速 + 推送报警）---
+    # --- 1. 检查是否达到超限阈值（按 OVER_LIMIT_MODE 执行：0=阻断，1=限速）---
     if (( $(awk "BEGIN {print ($TX_GB >= $LIMIT_GB) ? 1 : 0}") )); then
-        if ! tc qdisc show dev "$INTERFACE" | grep -q "htb"; then
-            tc qdisc del dev "$INTERFACE" root 2>/dev/null
-            tc qdisc add dev "$INTERFACE" root handle 1: htb default 10
-            tc class add dev "$INTERFACE" parent 1: classid 1:1 htb rate $RATE_LIMIT ceil $RATE_LIMIT
-            tc class add dev "$INTERFACE" parent 1:1 classid 1:10 htb rate $RATE_LIMIT ceil $RATE_LIMIT
-            tc filter add dev "$INTERFACE" protocol ip prio 1 u32 match u32 0 0 flowid 1:10
-            
-            TITLE="🚨 VPS 流量超限警告 (已限速)"
-            BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 已强制限速至 $RATE_LIMIT"
-            
-            echo "$(date): 累计出站流量已达 $TX_FORMATTED，网卡 $INTERFACE 已强制限速. IP: $IP_INFO ($GEO_RESULT)" >> "$LOG_FILE"
-            
-            bark_enc "$TITLE" "$BODY" "alarm"
+        if [ "$OVER_LIMIT_MODE" = "0" ]; then
+            # 模式 0：阻断断网（iptables 熔断，切断外网，SSH 逃生门保留）
+            if ! is_circuit_broken; then
+                trip_circuit_breaker
+
+                TITLE="🚨 VPS 流量超限警告 (已熔断断网)"
+                BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 外网已切断，SSH ($SSH_PORT) 逃生门已保留"
+
+                echo "$(date): 累计出站流量已达 $TX_FORMATTED，网卡 $INTERFACE 已熔断断网. IP: $IP_INFO ($GEO_RESULT)" >> "$LOG_FILE"
+
+                bark_enc "$TITLE" "$BODY" "alarm"
+            fi
+        else
+            # 模式 1：限速不断网（tc 限流，SSH 与服务都不掉线）
+            if ! tc qdisc show dev "$INTERFACE" | grep -q "htb"; then
+                tc qdisc del dev "$INTERFACE" root 2>/dev/null
+                tc qdisc add dev "$INTERFACE" root handle 1: htb default 10
+                tc class add dev "$INTERFACE" parent 1: classid 1:1 htb rate $RATE_LIMIT ceil $RATE_LIMIT
+                tc class add dev "$INTERFACE" parent 1:1 classid 1:10 htb rate $RATE_LIMIT ceil $RATE_LIMIT
+                tc filter add dev "$INTERFACE" protocol ip prio 1 u32 match u32 0 0 flowid 1:10
+
+                TITLE="🚨 VPS 流量超限警告 (已限速)"
+                BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 已强制限速至 $RATE_LIMIT"
+
+                echo "$(date): 累计出站流量已达 $TX_FORMATTED，网卡 $INTERFACE 已强制限速. IP: $IP_INFO ($GEO_RESULT)" >> "$LOG_FILE"
+
+                bark_enc "$TITLE" "$BODY" "alarm"
+            fi
         fi
         
     # --- 2. 检查阶段提醒 2（阈值跟顶部 LIMIT_20GB 走）---

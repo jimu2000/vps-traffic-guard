@@ -37,8 +37,10 @@ A lightweight VPS security monitoring script: **traffic monitoring + anti-mining
 |---------|---------|-------------|
 | `LIMIT_10GB` | 10 | Push a reminder when outbound traffic reaches 10GB (reminder only, no throttling) |
 | `LIMIT_20GB` | 20 | Push a reminder when outbound traffic reaches 20GB (reminder only, no throttling) |
-| `LIMIT_GB` | 200 | Auto speed-limit + push an alert when outbound traffic reaches 200GB |
-| `RATE_LIMIT` | 1600kbit | Speed limit target, ≈ 200 KB/s |
+| `LIMIT_GB` | 200 | Triggers the over-limit action when outbound traffic reaches 200GB (per `OVER_LIMIT_MODE`) |
+| `RATE_LIMIT` | 1600kbit | Speed limit target, ≈ 200 KB/s (rate-limit mode only) |
+| `OVER_LIMIT_MODE` | 1 | **Over-limit mode: 0 = block / disconnect (iptables circuit breaker, SSH escape port kept open), 1 = rate-limit and stay online (tc throttle)** |
+| `SSH_PORT` | 14422 | SSH escape port (block mode only; kept open when the breaker trips) |
 
 To get reminders at 5GB and 50GB instead, just change `LIMIT_10GB` to 5 and `LIMIT_20GB` to 50.
 
