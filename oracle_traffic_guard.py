@@ -15,6 +15,7 @@ import os
 import json
 import base64
 import secrets
+import string
 import subprocess
 from datetime import datetime
 
@@ -116,24 +117,26 @@ def send_bark_notification(title: str, body: str, sound: str = "alarm"):
         log_msg("Bark 加密 Key 未配置，跳过推送")
         return
     try:
+        # IV 必须是 16 位 ASCII 字符串，发送时用原文（不要 base64），否则 App 解密失败收不到
+        alphabet = string.ascii_letters + string.digits
+        iv = "".join(secrets.choice(alphabet) for _ in range(16))
         payload = json.dumps({
             "title": title, "body": body, "sound": sound,
             "group": "VPS 流量卫士",
         }, ensure_ascii=False)
-        iv = secrets.token_bytes(16)
         p = subprocess.run(
             ["openssl", "enc", "-aes-256-cbc", "-K", BARK_ENC_KEY.encode().hex(),
-             "-iv", iv.hex()],
+             "-iv", iv.encode().hex()],
             input=payload.encode(), capture_output=True)
         if p.returncode != 0:
             log_msg(f"Bark 加密失败: {p.stderr.decode(errors='replace')}")
             return
         ciphertext = base64.b64encode(p.stdout).decode()
-        iv_b64 = base64.b64encode(iv).decode()
         url = f"{BARK_SERVER}/{BARK_KEY}/"
-        data = f"ciphertext={ciphertext}&iv={iv_b64}"
         r = subprocess.run(
-            ["curl", "-s", "--max-time", "10", "-X", "POST", "-d", data, url],
+            ["curl", "-s", "--max-time", "10", "-X", "POST", url,
+             "--data-urlencode", f"ciphertext={ciphertext}",
+             "--data-urlencode", f"iv={iv}"],
             capture_output=True, text=True)
         if r.returncode == 0:
             try:
