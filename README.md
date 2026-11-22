@@ -8,9 +8,9 @@
 
 ## 📱 报警效果
 
-| 流量超限 | 挖矿检测 | Oracle 账单 |
-|----------|----------|-------------|
-| ![流量超限报警](docs/img/bark-traffic-alert.svg) | ![挖矿检测报警](docs/img/bark-mining-alert.svg) | ![Oracle 账单报警](docs/img/bark-oracle-alert.svg) |
+| 流量超限 | 挖矿检测 | Oracle 账单（实拍） |
+|----------|----------|---------------------|
+| ![流量超限报警](docs/img/bark-traffic-alert.svg) | ![挖矿检测报警](docs/img/bark-mining-alert.svg) | ![Oracle 账单报警实拍](docs/img/bark-oracle-real.jpg) |
 
 ## ✨ 功能
 
