@@ -26,6 +26,6 @@
   <!-- Title -->
   <text x="32" y="102" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="600" fill="#ffffff">&#128680; VPS &#27969;&#37327;&#36229;&#38480;&#35686;&#21578; (&#24050;&#38480;&#36895;)</text>
   <!-- Body -->
-  <text x="32" y="126" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="13" fill="#ffffff" opacity="0.85">&#32593;&#21345;: eth0  &#20844;&#32593; IP: 129.150.50.139 (&#26032;&#21152;&#22369;)</text>
+  <text x="32" y="126" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="13" fill="#ffffff" opacity="0.85">&#32593;&#21345;: eth0  &#20844;&#32593; IP: 1.2.3.4 (&#26032;&#21152;&#22369;)</text>
   <text x="32" y="148" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="13" fill="#ffffff" opacity="0.85">&#24403;&#21069;&#20986;&#31449;&#27969;&#37327;: 200.15 GB  &#29366;&#24577;: &#24050;&#24378;&#21046;&#38480;&#36895;&#33267; 1600kbit</text>
 </svg>
