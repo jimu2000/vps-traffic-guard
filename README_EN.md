@@ -1,10 +1,16 @@
-# 🔔 VPS Traffic Guard & Mining Detection
+# 🔔 VPS Guard: Traffic Monitoring, Anti-Mining & Oracle Billing Alerts
 
 [中文](README.md) | English
 
-A lightweight VPS security monitoring script: **traffic monitoring + anti-mining + persistence detection + rootkit scanning** — with **end-to-end encrypted Bark push notifications** to your iPhone when something goes wrong.
+A lightweight VPS security monitoring script: **traffic monitoring + anti-mining + persistence detection + rootkit scanning + Oracle billing monitoring** — with **end-to-end encrypted Bark push notifications** to your iPhone when something goes wrong.
 
 > Battle-tested on 6 production VPS instances. Runs fine even on a 1-core, 1GB box.
+
+## 📱 What Alerts Look Like
+
+| Traffic overage | Mining detected | Oracle billing |
+|-----------------|-----------------|----------------|
+| ![Traffic overage alert](docs/img/bark-traffic-alert.svg) | ![Mining detected alert](docs/img/bark-mining-alert.svg) | ![Oracle billing alert](docs/img/bark-oracle-alert.svg) |
 
 ## ✨ Features
 

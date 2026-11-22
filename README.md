@@ -1,10 +1,16 @@
-# 🔔 VPS 流量卫士及挖矿检测
+# 🔔 VPS 卫士：流量监控、防挖矿、Oracle 账单预警
 
 [English](README_EN.md) | 中文
 
-轻量级 VPS 安全监控脚本：**流量监控 + 防挖矿 + 持久化检测 + rootkit 扫描**，异常时通过**加密 Bark 推送**第一时间通知到你的 iPhone。
+轻量级 VPS 安全监控脚本：**流量监控 + 防挖矿 + 持久化检测 + rootkit 扫描 + Oracle 账单监控**，异常时通过**加密 Bark 推送**第一时间通知到你的 iPhone。
 
 > 部署在 6 台生产 VPS 上实测运行，单核 1GB 小鸡也能轻松带动。
+
+## 📱 报警效果
+
+| 流量超限 | 挖矿检测 | Oracle 账单 |
+|----------|----------|-------------|
+| ![流量超限报警](docs/img/bark-traffic-alert.svg) | ![挖矿检测报警](docs/img/bark-mining-alert.svg) | ![Oracle 账单报警](docs/img/bark-oracle-alert.svg) |
 
 ## ✨ 功能
 
