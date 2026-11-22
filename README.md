@@ -41,7 +41,7 @@
 
 | 网卡名 | 适用云厂商 |
 |--------|-----------|
-| `eth0` | AWS（Xen）、Azure、DigitalOcean、IBM Cloud、阿里云、Linode、OVHcloud、Vultr、Hetzner、华为云、Exoscale、Scaleway、Gcore、Contabo、腾讯云、IONOS |
+| `eth0` | AWS（Xen）、Azure、DigitalOcean、IBM Cloud、阿里云、Akamai（Linode）、OVHcloud、Vultr、Hetzner、华为云、Exoscale、Scaleway、Gcore、Contabo、腾讯云、IONOS |
 | `ens3` | Oracle Cloud、OVHcloud、Vultr、Hetzner Cloud、华为云、Exoscale、Scaleway、Gcore、Contabo、IONOS |
 | `ens5` | AWS Nitro（ENA）、阿里云新机型、腾讯云新机型 |
 | `ens4` | Google Cloud |

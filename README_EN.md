@@ -41,7 +41,7 @@ The script first reads the NIC from the default route (most accurate). If that f
 
 | NIC | Cloud providers |
 |-----|----------------|
-| `eth0` | AWS (Xen), Azure, DigitalOcean, IBM Cloud, Alibaba Cloud, Linode, OVHcloud, Vultr, Hetzner, Huawei Cloud, Exoscale, Scaleway, Gcore, Contabo, Tencent Cloud, IONOS |
+| `eth0` | AWS (Xen), Azure, DigitalOcean, IBM Cloud, Alibaba Cloud, Akamai (Linode), OVHcloud, Vultr, Hetzner, Huawei Cloud, Exoscale, Scaleway, Gcore, Contabo, Tencent Cloud, IONOS |
 | `ens3` | Oracle Cloud, OVHcloud, Vultr, Hetzner Cloud, Huawei Cloud, Exoscale, Scaleway, Gcore, Contabo, IONOS |
 | `ens5` | AWS Nitro (ENA), Alibaba Cloud (newer), Tencent Cloud (newer) |
 | `ens4` | Google Cloud |

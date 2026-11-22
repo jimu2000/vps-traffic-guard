@@ -84,7 +84,7 @@ bark_enc() {
 INTERFACE=$(ip route show default 2>/dev/null | awk "/default/ {print \$5}" | head -n1)
 if [ -z "$INTERFACE" ] || [ ! -f "/sys/class/net/$INTERFACE/statistics/tx_bytes" ]; then
     # 各云厂商常见网卡名（按通用程度排序）：
-    #   eth0    — AWS(Xen)/Azure/DigitalOcean/IBM/Alibaba/Linode/OVH/Vultr/
+    #   eth0    — AWS(Xen)/Azure/DigitalOcean/IBM/Alibaba/Akamai(Linode)/OVH/Vultr/
     #             Hetzner/Huawei/Exoscale/Scaleway/Gcore/Contabo/Tencent/IONOS
     #   ens3    — Oracle Cloud/OVH/Vultr/Hetzner Cloud/Huawei/Exoscale/
     #             Scaleway/Gcore/Contabo/IONOS（KVM 云主机常见）
@@ -140,30 +140,30 @@ if [ -f "$STAT_FILE" ]; then
             tc filter add dev "$INTERFACE" protocol ip prio 1 u32 match u32 0 0 flowid 1:10
             
             TITLE="🚨 VPS 流量超限警告 (已限速)"
-            BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 已强制限速至 200 KB/s"
+            BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 已强制限速至 $RATE_LIMIT"
             
             echo "$(date): 累计出站流量已达 $TX_FORMATTED，网卡 $INTERFACE 已强制限速. IP: $IP_INFO ($GEO_RESULT)" >> "$LOG_FILE"
             
             bark_enc "$TITLE" "$BODY" "alarm"
         fi
         
-    # --- 2. 检查 20 GB 阶段提醒 ---
-    elif (( $(awk "BEGIN {print ($TX_GB >= $LIMIT_20GB) ? 1 : 0}") )) && [ "$NOTIFIED_STAGE" -lt 20 ]; then
-        TITLE="⚠️ VPS 流量阶段提醒 (20GB)"
-        BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 20GB"
+    # --- 2. 检查阶段提醒 2（阈值跟顶部 LIMIT_20GB 走）---
+    elif (( $(awk "BEGIN {print ($TX_GB >= $LIMIT_20GB) ? 1 : 0}") )) && [ "$NOTIFIED_STAGE" -lt "$LIMIT_20GB" ]; then
+        TITLE="⚠️ VPS 流量阶段提醒 (${LIMIT_20GB}GB)"
+        BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 ${LIMIT_20GB}GB"
         
-        echo "$(date): 流量已达 20 GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
-        echo "20" > "$STATE_FILE"
+        echo "$(date): 流量已达 ${LIMIT_20GB} GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
+        echo "$LIMIT_20GB" > "$STATE_FILE"
         
         bark_enc "$TITLE" "$BODY" "minuet"
 
-    # --- 3. 检查 10 GB 阶段提醒 ---
-    elif (( $(awk "BEGIN {print ($TX_GB >= $LIMIT_10GB) ? 1 : 0}") )) && [ "$NOTIFIED_STAGE" -lt 10 ]; then
-        TITLE="ℹ️ VPS 流量阶段提醒 (10GB)"
-        BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 10GB"
+    # --- 3. 检查阶段提醒 1（阈值跟顶部 LIMIT_10GB 走）---
+    elif (( $(awk "BEGIN {print ($TX_GB >= $LIMIT_10GB) ? 1 : 0}") )) && [ "$NOTIFIED_STAGE" -lt "$LIMIT_10GB" ]; then
+        TITLE="ℹ️ VPS 流量阶段提醒 (${LIMIT_10GB}GB)"
+        BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 ${LIMIT_10GB}GB"
         
-        echo "$(date): 流量已达 10 GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
-        echo "10" > "$STATE_FILE"
+        echo "$(date): 流量已达 ${LIMIT_10GB} GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
+        echo "$LIMIT_10GB" > "$STATE_FILE"
         
         bark_enc "$TITLE" "$BODY" "telegraph"
     fi
