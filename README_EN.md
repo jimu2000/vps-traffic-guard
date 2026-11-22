@@ -37,7 +37,23 @@ To get reminders at 5GB and 50GB instead, just change `LIMIT_10GB` to 5 and `LIM
 
 ### Automatic NIC detection
 
-The script first reads the NIC from the default route (most accurate). If that fails, it tries common NIC names in order: `eth0`, `ens3`, `ens5`, `enp0s3`, `enp1s0`, `venet0`. If none works, it exits and logs the failure — no incorrect actions.
+The script first reads the NIC from the default route (most accurate). If that fails, it tries common NIC names in order. Covered cloud providers:
+
+| NIC | Cloud providers |
+|-----|----------------|
+| `eth0` | AWS (Xen), Azure, DigitalOcean, IBM Cloud, Alibaba Cloud, Linode, OVHcloud, Vultr, Hetzner, Huawei Cloud, Exoscale, Scaleway, Gcore, Contabo, Tencent Cloud, IONOS |
+| `ens3` | Oracle Cloud, OVHcloud, Vultr, Hetzner Cloud, Huawei Cloud, Exoscale, Scaleway, Gcore, Contabo, IONOS |
+| `ens5` | AWS Nitro (ENA), Alibaba Cloud (newer), Tencent Cloud (newer) |
+| `ens4` | Google Cloud |
+| `enp0s3` | Oracle (some shapes), KVM generic |
+| `enp1s0` | Vultr (newer), Hetzner dedicated, Scaleway |
+| `eno1` | OVH dedicated, Hetzner dedicated |
+| `ens6` | AWS (some Nitro shapes) |
+| `venet0` | OpenVZ containers (older Contabo, etc.) |
+| `eth1` | Private/VPC NIC on most providers (fallback) |
+| `enP1s1` | Azure (some predictable names) |
+
+If none works, it exits and logs the failure — no incorrect actions. Note: Backblaze B2 is object storage only (no server/NIC), so this script doesn't apply to it.
 
 ### Speed limit ≠ disconnection
 

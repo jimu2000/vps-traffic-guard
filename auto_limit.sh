@@ -83,9 +83,22 @@ bark_enc() {
 # 优先从默认路由获取（最准确），失败时按常见网卡名依次尝试
 INTERFACE=$(ip route show default 2>/dev/null | awk "/default/ {print \$5}" | head -n1)
 if [ -z "$INTERFACE" ] || [ ! -f "/sys/class/net/$INTERFACE/statistics/tx_bytes" ]; then
-    # 常见网卡名：eth0（传统）、ens3/ens5（Oracle Cloud）、
-    # enp0s3/enp1s0（KVM/QEMU）、venet0（OpenVZ）
-    for _nic in eth0 ens3 ens5 enp0s3 enp1s0 venet0; do
+    # 各云厂商常见网卡名（按通用程度排序）：
+    #   eth0    — AWS(Xen)/Azure/DigitalOcean/IBM/Alibaba/Linode/OVH/Vultr/
+    #             Hetzner/Huawei/Exoscale/Scaleway/Gcore/Contabo/Tencent/IONOS
+    #   ens3    — Oracle Cloud/OVH/Vultr/Hetzner Cloud/Huawei/Exoscale/
+    #             Scaleway/Gcore/Contabo/IONOS（KVM 云主机常见）
+    #   ens5    — AWS Nitro(ENA)/Alibaba 新机型/Tencent 新机型
+    #   ens4    — Google Cloud
+    #   enp0s3  — Oracle 部分机型/KVM 通用
+    #   enp1s0  — Vultr 新机型/Hetzner 独服/Scaleway
+    #   eno1    — OVH 独服/Hetzner 独服
+    #   ens6    — AWS 部分 Nitro 机型
+    #   venet0  — OpenVZ 容器（Contabo 老款等）
+    #   eth1    — 各厂商私网/内网网卡（备用）
+    #   enP1s1  — Azure 部分可预测命名
+    # 注：Backblaze B2 是纯对象存储，没有服务器/网卡，不适用本脚本。
+    for _nic in eth0 ens3 ens5 ens4 enp0s3 enp1s0 eno1 ens6 venet0 eth1 enP1s1; do
         if [ -f "/sys/class/net/$_nic/statistics/tx_bytes" ]; then
             INTERFACE="$_nic"
             break

@@ -37,7 +37,23 @@
 
 ### 网卡自动识别
 
-脚本优先从默认路由获取网卡名（最准确），如果获取失败，按常见网卡名依次尝试：`eth0`、`ens3`、`ens5`、`enp0s3`、`enp1s0`、`venet0`。全部失败则退出并写日志，不会误操作。
+脚本优先从默认路由获取网卡名（最准确），如果获取失败，按常见网卡名依次尝试。已覆盖的主流云厂商网卡：
+
+| 网卡名 | 适用云厂商 |
+|--------|-----------|
+| `eth0` | AWS（Xen）、Azure、DigitalOcean、IBM Cloud、阿里云、Linode、OVHcloud、Vultr、Hetzner、华为云、Exoscale、Scaleway、Gcore、Contabo、腾讯云、IONOS |
+| `ens3` | Oracle Cloud、OVHcloud、Vultr、Hetzner Cloud、华为云、Exoscale、Scaleway、Gcore、Contabo、IONOS |
+| `ens5` | AWS Nitro（ENA）、阿里云新机型、腾讯云新机型 |
+| `ens4` | Google Cloud |
+| `enp0s3` | Oracle 部分机型、KVM 通用 |
+| `enp1s0` | Vultr 新机型、Hetzner 独服、Scaleway |
+| `eno1` | OVH 独服、Hetzner 独服 |
+| `ens6` | AWS 部分 Nitro 机型 |
+| `venet0` | OpenVZ 容器（Contabo 老款等） |
+| `eth1` | 各厂商私网/内网网卡（备用） |
+| `enP1s1` | Azure 部分可预测命名 |
+
+全部失败则退出并写日志，不会误操作。注：Backblaze B2 是纯对象存储，没有服务器/网卡，不适用本脚本。
 
 ### 限速 ≠ 断网
 
