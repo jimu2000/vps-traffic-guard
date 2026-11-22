@@ -178,8 +178,27 @@ if [ -f "$STAT_FILE" ]; then
     TX_GB=$(awk "BEGIN {print $TX_BYTES / 1024 / 1024 / 1024}")
     TX_FORMATTED=$(awk "BEGIN {gb=$TX_GB; if(gb>=1) printf \"%.2f GB\", gb; else printf \"%.2f MB\", $TX_BYTES/1024/1024}")
 
+    # --- 重启检测：流量计数器（tx_bytes）重启后清零，但状态文件还在 ---
+    # 状态文件现在存两行：第 1 行是已提醒的阶段，第 2 行是开机时间
+    # （/proc/stat 里的 btime，重启后会变）。开机时间变了就说明重启过，
+    # 提醒阶段清零，否则流量重新涨到 10GB/20GB 时不会再提醒。
+    BOOT_TIME=$(awk '/^btime/ {print $2}' /proc/stat 2>/dev/null)
     NOTIFIED_STAGE=0
-    [ -f "$STATE_FILE" ] && NOTIFIED_STAGE=$(cat "$STATE_FILE")
+    SAVED_BOOT=""
+    if [ -f "$STATE_FILE" ]; then
+        NOTIFIED_STAGE=$(head -n1 "$STATE_FILE")
+        SAVED_BOOT=$(sed -n '2p' "$STATE_FILE")
+    fi
+    [ "$NOTIFIED_STAGE" -ge 0 ] 2>/dev/null || NOTIFIED_STAGE=0
+    if [ -z "$SAVED_BOOT" ]; then
+        # 老格式状态文件（只有一行数字）：只补记当前开机时间，不重置阶段，
+        # 避免升级后把已提醒过的阶段再推一次；之后重启就能正常识别了
+        [ -n "$BOOT_TIME" ] && printf '%s\n%s\n' "$NOTIFIED_STAGE" "$BOOT_TIME" > "$STATE_FILE"
+    elif [ -n "$BOOT_TIME" ] && [ "$SAVED_BOOT" != "$BOOT_TIME" ]; then
+        echo "$(date): 检测到重启（开机时间 $SAVED_BOOT -> $BOOT_TIME），已清空阶段提醒状态" >> "$LOG_FILE"
+        NOTIFIED_STAGE=0
+        printf '%s\n%s\n' "0" "$BOOT_TIME" > "$STATE_FILE"
+    fi
     
     IP_INFO=$(curl -s --max-time 5 https://ip.sb)
     [ -z "$IP_INFO" ] && IP_INFO="获取失败"
@@ -230,7 +249,7 @@ if [ -f "$STAT_FILE" ]; then
         BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 ${LIMIT_20GB}GB"
         
         echo "$(date): 流量已达 ${LIMIT_20GB} GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
-        echo "$LIMIT_20GB" > "$STATE_FILE"
+        printf '%s\n%s\n' "$LIMIT_20GB" "$BOOT_TIME" > "$STATE_FILE"
         
         bark_enc "$TITLE" "$BODY" "minuet"
 
@@ -240,7 +259,7 @@ if [ -f "$STAT_FILE" ]; then
         BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 ${LIMIT_10GB}GB"
         
         echo "$(date): 流量已达 ${LIMIT_10GB} GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
-        echo "$LIMIT_10GB" > "$STATE_FILE"
+        printf '%s\n%s\n' "$LIMIT_10GB" "$BOOT_TIME" > "$STATE_FILE"
         
         bark_enc "$TITLE" "$BODY" "telegraph"
     fi
