@@ -178,6 +178,11 @@ if [ -f "$STAT_FILE" ]; then
     TX_GB=$(awk "BEGIN {print $TX_BYTES / 1024 / 1024 / 1024}")
     TX_FORMATTED=$(awk "BEGIN {gb=$TX_GB; if(gb>=1) printf \"%.2f GB\", gb; else printf \"%.2f MB\", $TX_BYTES/1024/1024}")
 
+    # 当月入站/出站（vnstat 自然月统计，重启不丢）
+    read MONTH_RX MONTH_TX <<< $(vnstat -i "$INTERFACE" --json m 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); m=d['interfaces'][0]['traffic']['month'][-1]; print(f\"{m['rx']/1024/1024/1024:.2f} {m['tx']/1024/1024/1024:.2f}\")" 2>/dev/null)
+    [ -z "$MONTH_RX" ] && MONTH_RX="?"
+    [ -z "$MONTH_TX" ] && MONTH_TX="?"
+
     # --- 重启检测：流量计数器（tx_bytes）重启后清零，但状态文件还在 ---
     # 状态文件现在存两行：第 1 行是已提醒的阶段，第 2 行是开机时间
     # （/proc/stat 里的 btime，重启后会变）。开机时间变了就说明重启过，
@@ -200,15 +205,13 @@ if [ -f "$STAT_FILE" ]; then
         printf '%s\n%s\n' "0" "$BOOT_TIME" > "$STATE_FILE"
     fi
     
-    IP_INFO=$(curl -s --max-time 5 https://ip.sb)
-    [ -z "$IP_INFO" ] && IP_INFO="获取失败"
+    IP_INFO=$(curl -4 -fsS --max-time 3 https://api.ipify.org 2>/dev/null || curl -4 -fsS --max-time 3 https://ip.sb 2>/dev/null || echo "获取失败")
     
-    GEO_RESULT="未知国家 (未知地区)"
-    API_RES=$(curl -s --max-time 3 "http://ip-api.com/json/?lang=zh-CN")
+    GEO_RESULT="未知地区"
+    API_RES=$(curl -4 -fsS --max-time 3 "http://ip-api.com/json/${IP_INFO}?lang=zh-CN" 2>/dev/null)
     if [ -n "$API_RES" ]; then
-        C_NAME=$(echo "$API_RES" | grep -o '"country":"[^"]*"' | head -n1 | cut -d'"' -f4)
-        CI_NAME=$(echo "$API_RES" | grep -o '"city":"[^"]*"' | head -n1 | cut -d'"' -f4)
-        [ -n "$C_NAME" ] && [ -n "$CI_NAME" ] && GEO_RESULT="$C_NAME ($CI_NAME)"
+        CI_NAME=$(echo "$API_RES" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('city','') if d.get('status')=='success' else '')" 2>/dev/null)
+        [ -n "$CI_NAME" ] && GEO_RESULT="$CI_NAME"
     fi
 
     # --- 1. 检查是否达到超限阈值（按 OVER_LIMIT_MODE 执行：0=阻断，1=限速）---
@@ -219,7 +222,7 @@ if [ -f "$STAT_FILE" ]; then
                 trip_circuit_breaker
 
                 TITLE="🚨 VPS 流量超限警告 (已熔断断网)"
-                BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 外网已切断，SSH ($SSH_PORT) 逃生门已保留"
+                BODY="IP: $IP_INFO ($GEO_RESULT)\n当月入站: ${MONTH_RX} GiB / 当月出站: ${MONTH_TX} GiB\n状态: 外网已切断，SSH ($SSH_PORT) 逃生门已保留"
 
                 echo "$(date): 累计出站流量已达 $TX_FORMATTED，网卡 $INTERFACE 已熔断断网. IP: $IP_INFO ($GEO_RESULT)" >> "$LOG_FILE"
 
@@ -235,7 +238,7 @@ if [ -f "$STAT_FILE" ]; then
                 tc filter add dev "$INTERFACE" protocol ip prio 1 u32 match u32 0 0 flowid 1:10
 
                 TITLE="🚨 VPS 流量超限警告 (已限速)"
-                BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 已强制限速至 $RATE_LIMIT"
+                BODY="IP: $IP_INFO ($GEO_RESULT)\n当月入站: ${MONTH_RX} GiB / 当月出站: ${MONTH_TX} GiB\n状态: 已强制限速至 $RATE_LIMIT"
 
                 echo "$(date): 累计出站流量已达 $TX_FORMATTED，网卡 $INTERFACE 已强制限速. IP: $IP_INFO ($GEO_RESULT)" >> "$LOG_FILE"
 
@@ -246,7 +249,7 @@ if [ -f "$STAT_FILE" ]; then
     # --- 2. 检查阶段提醒 2（阈值跟顶部 LIMIT_20GB 走）---
     elif (( $(awk "BEGIN {print ($TX_GB >= $LIMIT_20GB) ? 1 : 0}") )) && [ "$NOTIFIED_STAGE" -lt "$LIMIT_20GB" ]; then
         TITLE="⚠️ VPS 流量阶段提醒 (${LIMIT_20GB}GB)"
-        BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 ${LIMIT_20GB}GB"
+        BODY="IP: $IP_INFO ($GEO_RESULT)\n当月入站: ${MONTH_RX} GiB / 当月出站: ${MONTH_TX} GiB\n状态: 流量已满 ${LIMIT_20GB}GB"
         
         echo "$(date): 流量已达 ${LIMIT_20GB} GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
         printf '%s\n%s\n' "$LIMIT_20GB" "$BOOT_TIME" > "$STATE_FILE"
@@ -256,7 +259,7 @@ if [ -f "$STAT_FILE" ]; then
     # --- 3. 检查阶段提醒 1（阈值跟顶部 LIMIT_10GB 走）---
     elif (( $(awk "BEGIN {print ($TX_GB >= $LIMIT_10GB) ? 1 : 0}") )) && [ "$NOTIFIED_STAGE" -lt "$LIMIT_10GB" ]; then
         TITLE="ℹ️ VPS 流量阶段提醒 (${LIMIT_10GB}GB)"
-        BODY="网卡: $INTERFACE\n公网 IP: $IP_INFO ($GEO_RESULT)\n当前出站流量: $TX_FORMATTED\n状态: 流量已满 ${LIMIT_10GB}GB"
+        BODY="IP: $IP_INFO ($GEO_RESULT)\n当月入站: ${MONTH_RX} GiB / 当月出站: ${MONTH_TX} GiB\n状态: 流量已满 ${LIMIT_10GB}GB"
         
         echo "$(date): 流量已达 ${LIMIT_10GB} GB 阶段。当前: $TX_FORMATTED" >> "$LOG_FILE"
         printf '%s\n%s\n' "$LIMIT_10GB" "$BOOT_TIME" > "$STATE_FILE"

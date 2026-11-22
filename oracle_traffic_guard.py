@@ -123,18 +123,18 @@ except NameError:
 
 def get_ip_and_geo() -> tuple:
     ip_info = "获取失败"
-    geo_result = "未知国家 (未知地区)"
-    rc, out, _ = run_cmd("curl -s --max-time 3 https://ip.sb")
+    geo_result = "未知地区"
+    rc, out, _ = run_cmd("curl -4 -fsS --max-time 3 https://api.ipify.org")
+    if rc != 0 or not out:
+        rc, out, _ = run_cmd("curl -4 -fsS --max-time 3 https://ip.sb")
     if rc == 0 and out:
         ip_info = out.strip()
-    rc, out, _ = run_cmd("curl -s --max-time 3 http://ip-api.com/json/?lang=zh-CN")
+    rc, out, _ = run_cmd(f"curl -4 -fsS --max-time 3 'http://ip-api.com/json/{ip_info}?lang=zh-CN'")
     if rc == 0 and out:
         try:
             data = json.loads(out)
             if data.get("status") == "success":
-                country = data.get("country", "未知国家")
-                city = data.get("city", "未知地区")
-                geo_result = f"{country} ({city})"
+                geo_result = data.get("city") or "未知地区"
         except Exception:
             pass
     return ip_info, geo_result
@@ -219,6 +219,26 @@ def get_monthly_tx_bytes() -> int:
     return get_ip_tx_bytes()
 
 
+def get_monthly_rx_tx_gb() -> tuple:
+    """返回 (当月入站 GiB, 当月出站 GiB)，失败返回 (0.0, 0.0)"""
+    rc, out, _ = run_cmd(f"vnstat -i {IFACE} --json m")
+    if rc == 0 and out:
+        try:
+            data = json.loads(out)
+            for iface in data.get("interfaces", []):
+                if iface.get("name") == IFACE:
+                    now = datetime.now()
+                    for m in iface.get("traffic", {}).get("month", []):
+                        d = m.get("date", {})
+                        if d.get("year") == now.year and d.get("month") == now.month:
+                            rx = m.get("rx", 0) / (1024 ** 3)
+                            tx = m.get("tx", 0) / (1024 ** 3)
+                            return (rx, tx)
+        except Exception as e:
+            log_msg(f"解析 vnstat 月流量出错: {e}")
+    return (0.0, 0.0)
+
+
 # ==================== 模式 0：阻断断网（iptables 熔断） ====================
 
 def ensure_chain():
@@ -250,8 +270,10 @@ def trip_circuit_breaker(reason: str):
     ]
     for c in cmds:
         run_cmd(c)
-    body = (f"公网 IP: {ip_info} ({geo_result})\n监听网卡: {IFACE}\n"
-            f"当月出站已达硬顶阈值\n状态: 外网已切断，SSH ({SSH_PORT}) 逃生门已保留")
+    rx_gb, tx_gb = get_monthly_rx_tx_gb()
+    body = (f"IP: {ip_info} ({geo_result})\n"
+            f"当月入站: {rx_gb:.2f} GiB / 当月出站: {tx_gb:.2f} GiB\n"
+            f"状态: 外网已切断，SSH ({SSH_PORT}) 逃生门已保留")
     send_bark_notification("VPS 流量超限已熔断断网", body, sound="alarm")
     log_msg("熔断生效：外网出站已切断，自定义 SSH 端口保持正常。")
 
@@ -279,8 +301,10 @@ def apply_rate_limit(reason: str):
     if rc != 0:
         log_msg(f"tc 限速失败: {err}")
         return
-    body = (f"公网 IP: {ip_info} ({geo_result})\n监听网卡: {IFACE}\n"
-            f"当月出站已达硬顶阈值\n状态: 已限速至 {RATE_LIMIT}，不断网，SSH 正常\n"
+    rx_gb, tx_gb = get_monthly_rx_tx_gb()
+    body = (f"IP: {ip_info} ({geo_result})\n"
+            f"当月入站: {rx_gb:.2f} GiB / 当月出站: {tx_gb:.2f} GiB\n"
+            f"状态: 已限速至 {RATE_LIMIT}，不断网，SSH 正常\n"
             f"恢复命令: tc qdisc del dev {IFACE} root")
     send_bark_notification("VPS 流量超限已限速", body, sound="alarm")
     log_msg(f"限速生效：出站已降到 {RATE_LIMIT}，不断网。")
@@ -325,8 +349,9 @@ def check_traffic():
         if monthly_tx_gb >= limit_val and limit_val not in notified_stages:
             ip_info, geo_result = get_ip_and_geo()
             log_msg(f"流量预警：IP {ip_info} 月出站已达 {monthly_tx_gb:.2f} GB (触发 {limit_val}GB 阶梯)")
-            body_msg = (f"公网 IP: {ip_info} ({geo_result})\n网卡: {IFACE}\n"
-                        f"当前月出站: {monthly_tx_gb:.2f} GB")
+            rx_gb, _ = get_monthly_rx_tx_gb()
+            body_msg = (f"IP: {ip_info} ({geo_result})\n"
+                        f"当月入站: {rx_gb:.2f} GiB / 当月出站: {monthly_tx_gb:.2f} GiB")
             send_bark_notification(f"VPS {title_text}", body_msg, sound=sound_type)
             notified_stages.append(limit_val)
             break
@@ -362,9 +387,10 @@ if __name__ == "__main__":
         mode_name = "阻断断网" if OVER_LIMIT_MODE == 0 else "限速不断网"
         status_str = "已熔断断网" if is_circuit_broken() else (
             "已限速" if is_rate_limited() else "正常畅通")
-        body_msg = (f"公网 IP: {ip_info} ({geo_result})\n网卡: {IFACE}\n"
-                    f"当前出站流量: {current_flow:.3f} GB\n超限模式: {mode_name}\n"
-                    f"状态: {status_str}\n提示: IP与地理位置连通性测试成功！")
+        rx_gb, _ = get_monthly_rx_tx_gb()
+        body_msg = (f"IP: {ip_info} ({geo_result})\n"
+                    f"当月入站: {rx_gb:.2f} GiB / 当月出站: {current_flow:.2f} GiB\n"
+                    f"超限模式: {mode_name}\n状态: {status_str}")
         send_bark_notification("VPS 流量卫士运行状态", body_msg, sound="glass")
         print("测试通知已成功发送至手机！")
     elif action == "trip":
