@@ -44,7 +44,7 @@ STAGES = [
 # 【SSH 逃生端口】自动识别 sshd 实际监听的端口，不用手动改
 # 识别顺序：ss 监听端口 → sshd_config → 默认 22
 # 如自动识别不准，取消下面一行的注释手动指定：
-# SSH_PORT_OVERRIDE = 14422
+# SSH_PORT_OVERRIDE = 22
 #
 # 【Bark 推送】把 xxxxx 换成你自己的
 #   BARK_KEY：Bark App 里设备 Key（22 位）
