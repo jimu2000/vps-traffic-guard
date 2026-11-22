@@ -40,7 +40,7 @@
 | `LIMIT_GB` | 200 | 出站流量到 200GB 时触发超限处理（按 `OVER_LIMIT_MODE` 执行） |
 | `RATE_LIMIT` | 1600kbit | 限速目标，约 200 KB/s（仅限速模式生效） |
 | `OVER_LIMIT_MODE` | 1 | **超限处理模式：0 = 阻断断网（iptables 熔断，SSH 逃生门保留），1 = 限速不断网（tc 限流）** |
-| `SSH_PORT` | 14422 | SSH 逃生端口（仅阻断模式生效，熔断时放行这个端口） |
+| `SSH_PORT` | 自动识别 | SSH 逃生端口（仅阻断模式生效）：自动检测 sshd 实际监听的端口，不用手动改；如需手动指定，取消 `SSH_PORT_OVERRIDE` 的注释 |
 
 想改成 5GB 提醒、50GB 提醒，直接把 `LIMIT_10GB` 改成 5、`LIMIT_20GB` 改成 50 就行。
 

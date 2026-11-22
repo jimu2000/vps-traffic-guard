@@ -40,7 +40,7 @@ A lightweight VPS security monitoring script: **traffic monitoring + anti-mining
 | `LIMIT_GB` | 200 | Triggers the over-limit action when outbound traffic reaches 200GB (per `OVER_LIMIT_MODE`) |
 | `RATE_LIMIT` | 1600kbit | Speed limit target, ≈ 200 KB/s (rate-limit mode only) |
 | `OVER_LIMIT_MODE` | 1 | **Over-limit mode: 0 = block / disconnect (iptables circuit breaker, SSH escape port kept open), 1 = rate-limit and stay online (tc throttle)** |
-| `SSH_PORT` | 14422 | SSH escape port (block mode only; kept open when the breaker trips) |
+| `SSH_PORT` | auto-detected | SSH escape port (block mode only): auto-detects the port sshd actually listens on, no manual edit needed; uncomment `SSH_PORT_OVERRIDE` to set it manually |
 
 To get reminders at 5GB and 50GB instead, just change `LIMIT_10GB` to 5 and `LIMIT_20GB` to 50.
 

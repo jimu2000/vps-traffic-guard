@@ -41,8 +41,10 @@ STAGES = [
     (5.0,   "5GB 阶段提醒",   "glass"),
 ]
 #
-# 【SSH 逃生端口】阻断模式下 iptables 会放行这个端口，改成你自己的 SSH 端口
-SSH_PORT = 14422           # 默认 22，改过端口的填实际端口，填错了阻断后连不上！
+# 【SSH 逃生端口】自动识别 sshd 实际监听的端口，不用手动改
+# 识别顺序：ss 监听端口 → sshd_config → 默认 22
+# 如自动识别不准，取消下面一行的注释手动指定：
+# SSH_PORT_OVERRIDE = 14422
 #
 # 【Bark 推送】把 xxxxx 换成你自己的
 #   BARK_KEY：Bark App 里设备 Key（22 位）
@@ -87,6 +89,36 @@ def get_active_iface() -> str:
 
 
 IFACE = get_active_iface()
+
+
+def detect_ssh_port() -> int:
+    """自动识别 sshd 实际监听的端口：ss → sshd_config → 默认 22"""
+    # 方法 1：ss 看 sshd 实际监听端口（最准）
+    rc, out, _ = run_cmd("ss -tlnp 2>/dev/null | awk '/sshd/ {print $4}' | head -n1")
+    if rc == 0 and out:
+        port = out.strip().rsplit(":", 1)[-1]
+        if port.isdigit():
+            return int(port)
+    # 方法 2：sshd_config 里的 Port（去掉注释行）
+    try:
+        with open("/etc/ssh/sshd_config", "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("Port "):
+                    port = line.split()[1]
+                    if port.isdigit():
+                        return int(port)
+    except Exception:
+        pass
+    # 方法 3：默认 22
+    return 22
+
+
+# 手动指定优先（SSH_PORT_OVERRIDE），否则自动识别
+try:
+    SSH_PORT = SSH_PORT_OVERRIDE
+except NameError:
+    SSH_PORT = detect_ssh_port()
 
 
 def get_ip_and_geo() -> tuple:

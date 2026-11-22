@@ -45,9 +45,10 @@ RATE_LIMIT="1600kbit"
 #   1 = 限速不断网（tc 限流到 RATE_LIMIT，SSH 与服务都不掉线，怕断网选这个）
 OVER_LIMIT_MODE=1
 
-# SSH 逃生端口：仅阻断模式（OVER_LIMIT_MODE=0）生效，熔断时放行这个端口
-# 改成你自己的 SSH 端口，填错了阻断后连不上！
-SSH_PORT=14422
+# SSH 逃生端口：自动识别 sshd 实际监听的端口，不用手动改
+# 识别顺序：ss 监听端口 → sshd_config → 默认 22
+# 如自动识别不准，取消下面一行的注释手动指定：
+# SSH_PORT_OVERRIDE=14422
 
 # ============================================================================
 # ★★★ Bark 推送配置 ★★★
@@ -112,6 +113,33 @@ trip_circuit_breaker() {
     iptables -A TRAFFIC_GUARD -d 192.168.0.0/16 -j ACCEPT
     iptables -A TRAFFIC_GUARD -o "$INTERFACE" -j DROP
 }
+
+# ---------- SSH 端口自动识别 ----------
+# 熔断时要放行 SSH 端口，填错了阻断后连不上，所以自动检测 sshd 实际监听的端口
+detect_ssh_port() {
+    local _port
+    # 方法 1：ss 看 sshd 实际监听端口（最准）
+    _port=$(ss -tlnp 2>/dev/null | awk '/sshd/ {print $4}' | head -n1 | sed 's/.*://')
+    if [ -n "$_port" ] && [ "$_port" -gt 0 ] 2>/dev/null; then
+        echo "$_port"
+        return
+    fi
+    # 方法 2：sshd_config 里的 Port（去掉注释行）
+    _port=$(grep -E "^Port" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n1)
+    if [ -n "$_port" ] && [ "$_port" -gt 0 ] 2>/dev/null; then
+        echo "$_port"
+        return
+    fi
+    # 方法 3：默认 22
+    echo "22"
+}
+
+# 手动指定优先（SSH_PORT_OVERRIDE），否则自动识别
+if [ -n "$SSH_PORT_OVERRIDE" ]; then
+    SSH_PORT="$SSH_PORT_OVERRIDE"
+else
+    SSH_PORT=$(detect_ssh_port)
+fi
 
 # ---------- 网卡自动识别 ----------
 # 优先从默认路由获取（最准确），失败时按常见网卡名依次尝试
