@@ -53,7 +53,11 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 STATE_DIR="/root/.security_guard"
 BASELINE_DIR="/root/.security_baseline"
 HOST_ID="$(hostname 2>/dev/null || echo unknown)"
-HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+# 公网 IP：推送里显示公网 IP 才能认出是哪台机器（内网 IP 10.0.0.x 认不出来）
+# 优先 IPv4，失败时试 IPv6（纯 IPv6 机器），再失败回退本机 IP
+HOST_IP="$(curl -4 -s --max-time 3 https://ip.sb 2>/dev/null)"
+[ -z "$HOST_IP" ] && HOST_IP="$(curl -s --max-time 3 https://ip.sb 2>/dev/null)"
+[ -z "$HOST_IP" ] && HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [ -z "$HOST_IP" ] && HOST_IP="?"
 mkdir -p "$STATE_DIR" "$BASELINE_DIR" 2>/dev/null
 
