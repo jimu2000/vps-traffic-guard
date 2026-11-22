@@ -75,6 +75,54 @@ tc qdisc del dev <网卡名> root
 - 只统计**出站流量**（tx_bytes），入站不计。
 - 统计值来自网卡启动以来的累计值，**服务器重启后清零**。如果你的 VPS 按自然月计费，每月 1 号重启一次服务器即可对齐（或手动重置统计）。
 
+## 🐕 流量终极看门狗（oracle_traffic_guard.py）
+
+`auto_limit.sh` 的 Python 升级版：vnstat 按自然月统计（重启不清零）+ IP 与地理位置解析 + 阶梯预警 + **超限处理二选一**。
+
+### 超限模式自由选择（改一个数字就行）
+
+| `OVER_LIMIT_MODE` | 模式 | 超限后会发生什么 | 适合谁 |
+|---|---|---|---|
+| `0`（默认） | **阻断断网** | iptables 熔断：切断外网出站，SSH 逃生门与内网保留 | 怕超额扣费，宁可断网也要保住钱包 |
+| `1` | **限速不断网** | tc 限流到 `RATE_LIMIT`（默认约 200KB/s），SSH 与服务都不掉线 | 怕断网影响服务，宁可变慢也不断连 |
+
+```python
+# ★★★ 流量阈值配置（都在这里，改数字就能用）★★★
+OVER_LIMIT_MODE = 0        # 0 是阻断，1 是限流
+MONTHLY_LIMIT_GB = 200.0   # 月流量硬顶，到量触发超限处理
+RATE_LIMIT = "1600kbit"    # 限速模式下的速率（仅模式 1 生效）
+```
+
+### 与 auto_limit.sh 的区别
+
+| | auto_limit.sh | oracle_traffic_guard.py |
+|---|---|---|
+| 流量统计 | 网卡累计值（重启清零） | vnstat 按自然月（重启不清零） |
+| 超限处理 | 只有 tc 限速 | 阻断 / 限速二选一 |
+| 阶梯预警 | 2 档（10GB / 20GB） | 4 档（5 / 20 / 50 / 100GB） |
+| 推送内容 | IP + 流量 | IP + 地理位置 + 流量 |
+| 适用场景 | 通用 VPS | 甲骨文云（按月计费）优先 |
+
+### 常用命令
+
+```bash
+python3 oracle_traffic_guard.py status   # 查看当前流量、模式与超限状态
+python3 oracle_traffic_guard.py test     # 发一条测试推送到手机
+python3 oracle_traffic_guard.py trip     # 手动触发超限处理（按配置的模式）
+python3 oracle_traffic_guard.py reset    # 解除熔断与限速（两种状态都清掉）
+```
+
+### 安装
+
+```bash
+apt-get update && apt-get install -y vnstat python3 curl
+systemctl enable --now vnstat
+cp oracle_traffic_guard.py /usr/local/bin/
+chmod +x /usr/local/bin/oracle_traffic_guard.py
+# 改好顶部的 BARK_KEY、BARK_ENC_KEY、OVER_LIMIT_MODE 后加入 cron：
+# */10 * * * * /usr/bin/python3 /usr/local/bin/oracle_traffic_guard.py check
+```
+
 ## ☁️ Oracle Cloud 账单监控（oracle_billing_monitor.py）
 
 每天早上检查 Oracle Cloud 账单，防止误开付费实例悄悄扣费：
@@ -221,6 +269,7 @@ crontab -e
 | 文件 | 说明 |
 |------|------|
 | `auto_limit.sh` | 流量卫士：出站流量监控 + 超限自动限速（阈值在脚本顶部） |
+| `oracle_traffic_guard.py` | 流量终极看门狗：vnstat 月统计 + 阶梯预警 + 超限阻断/限速二选一 |
 | `vps_security_guard.sh` | 主监控脚本（CPU / 挖矿 / 持久化 / rkhunter） |
 | `bark_enc.sh` | 独立的 Bark 加密推送脚本，可在其他脚本里调用 |
 | `oracle_billing_monitor.py` | Oracle Cloud 账单监控：每天检查费用，超预算报警，自动停掉付费实例（需 `pip install oci`） |

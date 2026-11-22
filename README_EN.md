@@ -75,6 +75,54 @@ tc qdisc del dev <interface> root
 - Only **outbound traffic** (tx_bytes) is counted; inbound is ignored.
 - The counter is cumulative since the NIC came up and **resets on reboot**. If your VPS bills monthly, reboot on the 1st of each month to align (or reset the counter manually).
 
+## 🐕 Traffic Ultimate Guard (oracle_traffic_guard.py)
+
+The Python upgrade of `auto_limit.sh`: vnstat monthly counting (survives reboots) + public IP & geolocation + tiered alerts + **two over-limit modes to choose from**.
+
+### Pick your over-limit mode (change one number)
+
+| `OVER_LIMIT_MODE` | Mode | What happens when the limit is hit | Best for |
+|---|---|---|---|
+| `0` (default) | **Block / disconnect** | iptables circuit breaker: cuts outbound internet, keeps the SSH escape port and LAN open | You'd rather lose connectivity than pay overage |
+| `1` | **Rate-limit, stay online** | tc throttles outbound to `RATE_LIMIT` (default ~200KB/s), SSH and services stay up | You'd rather be slow than disconnected |
+
+```python
+# ★★★ Threshold config (all here, just change the numbers) ★★★
+OVER_LIMIT_MODE = 0        # 0 = block, 1 = rate-limit
+MONTHLY_LIMIT_GB = 200.0   # Monthly hard cap; hitting it triggers the mode above
+RATE_LIMIT = "1600kbit"    # Throttle speed (only used in mode 1)
+```
+
+### Differences from auto_limit.sh
+
+| | auto_limit.sh | oracle_traffic_guard.py |
+|---|---|---|
+| Traffic counting | NIC cumulative (resets on reboot) | vnstat calendar month (survives reboots) |
+| Over-limit action | tc rate-limit only | Block or rate-limit, your choice |
+| Tiered alerts | 2 tiers (10GB / 20GB) | 4 tiers (5 / 20 / 50 / 100GB) |
+| Push content | IP + traffic | IP + geolocation + traffic |
+| Best for | Any VPS | Oracle Cloud (monthly billing) first |
+
+### Commands
+
+```bash
+python3 oracle_traffic_guard.py status   # Current traffic, mode and over-limit state
+python3 oracle_traffic_guard.py test     # Send a test push to your phone
+python3 oracle_traffic_guard.py trip     # Manually trigger the over-limit action
+python3 oracle_traffic_guard.py reset    # Clear both circuit breaker and rate limit
+```
+
+### Install
+
+```bash
+apt-get update && apt-get install -y vnstat python3 curl
+systemctl enable --now vnstat
+cp oracle_traffic_guard.py /usr/local/bin/
+chmod +x /usr/local/bin/oracle_traffic_guard.py
+# Edit BARK_KEY, BARK_ENC_KEY and OVER_LIMIT_MODE at the top, then add to cron:
+# */10 * * * * /usr/bin/python3 /usr/local/bin/oracle_traffic_guard.py check
+```
+
 ## ☁️ Oracle Cloud Billing Monitor (oracle_billing_monitor.py)
 
 Checks your Oracle Cloud bill every morning so a mistakenly launched paid instance can't silently drain your wallet:
@@ -221,6 +269,7 @@ If you receive a "Security Monitor Test" push on your phone, you're all set. If 
 | File | Description |
 |------|-------------|
 | `auto_limit.sh` | Traffic Guard: outbound traffic monitoring + auto speed-limit on overage (thresholds at the top) |
+| `oracle_traffic_guard.py` | Traffic Ultimate Guard: vnstat monthly counting + tiered alerts + block-or-throttle choice |
 | `vps_security_guard.sh` | Main monitoring script (CPU / mining / persistence / rkhunter) |
 | `bark_enc.sh` | Standalone encrypted Bark push script, usable in other scripts |
 | `oracle_billing_monitor.py` | Oracle Cloud billing monitor: daily cost check, over-budget alerts, auto-stops paid instances (needs `pip install oci`) |
