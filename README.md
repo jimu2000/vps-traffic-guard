@@ -15,6 +15,7 @@
 | **挖矿连接** | 防挖矿 | 发现到矿池端口（3333 / 4444 / 5555 / 7777 / 9999 / 14433 / 14444 / 45700 等）的出站连接 |
 | **持久化基线** | 防入侵 | crontab、`/etc/cron.d`、systemd 启用服务、`authorized_keys` 发生变化 |
 | **rkhunter** | 防 rootkit | 每周扫描，有警告则推送（已内置常见误报白名单） |
+| **Oracle 账单监控** | 防超支 | 每天检查 Oracle Cloud 账单，超预算报警，自动停掉付费实例（只停不停删） |
 
 **报警去重**：同一问题只报一次，恢复后会推送"已恢复正常"，不会刷屏。
 
@@ -67,6 +68,33 @@ tc qdisc del dev <网卡名> root
 
 - 只统计**出站流量**（tx_bytes），入站不计。
 - 统计值来自网卡启动以来的累计值，**服务器重启后清零**。如果你的 VPS 按自然月计费，每月 1 号重启一次服务器即可对齐（或手动重置统计）。
+
+## ☁️ Oracle Cloud 账单监控（oracle_billing_monitor.py）
+
+每天早上检查 Oracle Cloud 账单，防止误开付费实例悄悄扣费：
+
+- **费用检查**：用 OCI Usage API 查本月已花多少，对比预算（默认 SGD 1.00），超支就报警
+- **新增费用提醒**：跟上次检查对比，本月费用有新增就告诉你多了多少
+- **自动停机**：发现运行中的付费规格实例（如 E5/E4/E3 Flex），自动 STOP（只停不停删，随时能再开）。Always Free 规格（A1.Flex、E2.1.Micro）和保护名单里的服务器永远不会被停
+- **免费额度检查**：A1 超过 4 OCPU / 24GB、E2.1.Micro 超过 2 台时提醒，超出部分会收费
+- **多账号**：支持多个 Oracle 账号（每个账号一个 OCI profile）
+
+有报警或检查失败时，用加密 Bark 推送到手机；没事就静默，只在 stdout 输出 JSON 报告。
+
+### 配置
+
+```bash
+pip install oci
+```
+
+1. 在 Oracle 控制台生成 API 密钥对，把公钥加到账号（用户设置 → API Keys），按 [OCI 官方文档](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm)写好 `~/.oci/config`（每个账号一个 profile）
+2. 打开脚本顶部配置区，填你的 profile 和账号名、预算、保护名单（重要服务器的显示名）
+3. （可选）Bark 推送：把 Bark 推送 URL 存到脚本同目录的 `bark_url` 文件、32 位加密 Key 存到 `bark_key` 文件，`chmod 600`。没有这两个文件时脚本照常运行，只是不发推送
+4. 加到 cron，每天早上跑一次：
+
+```cron
+15 8 * * * /usr/bin/python3 /path/to/oracle_billing_monitor.py
+```
 
 ## 🏗️ 工作原理
 
@@ -189,6 +217,7 @@ crontab -e
 | `auto_limit.sh` | 流量卫士：出站流量监控 + 超限自动限速（阈值在脚本顶部） |
 | `vps_security_guard.sh` | 主监控脚本（CPU / 挖矿 / 持久化 / rkhunter） |
 | `bark_enc.sh` | 独立的 Bark 加密推送脚本，可在其他脚本里调用 |
+| `oracle_billing_monitor.py` | Oracle Cloud 账单监控：每天检查费用，超预算报警，自动停掉付费实例（需 `pip install oci`） |
 
 ### bark_enc.sh 单独使用
 

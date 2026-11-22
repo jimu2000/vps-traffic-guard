@@ -15,6 +15,7 @@ A lightweight VPS security monitoring script: **traffic monitoring + anti-mining
 | **Mining connections** | Anti-mining | Outbound connection to a known mining pool port (3333 / 4444 / 5555 / 7777 / 9999 / 14433 / 14444 / 45700, etc.) |
 | **Persistence baseline** | Anti-intrusion | Changes to crontab, `/etc/cron.d`, enabled systemd services, or `authorized_keys` |
 | **rkhunter** | Anti-rootkit | Weekly scan; alerts on warnings (common false positives pre-whitelisted) |
+| **Oracle billing monitor** | Anti-overcharge | Daily Oracle Cloud billing check; alerts on over-budget and auto-stops paid instances (stop only, never terminate) |
 
 **Alert deduplication**: The same issue alerts only once. You'll get a "back to normal" notification when it recovers — no spam.
 
@@ -67,6 +68,33 @@ tc qdisc del dev <interface> root
 
 - Only **outbound traffic** (tx_bytes) is counted; inbound is ignored.
 - The counter is cumulative since the NIC came up and **resets on reboot**. If your VPS bills monthly, reboot on the 1st of each month to align (or reset the counter manually).
+
+## ☁️ Oracle Cloud Billing Monitor (oracle_billing_monitor.py)
+
+Checks your Oracle Cloud bill every morning so a mistakenly launched paid instance can't silently drain your wallet:
+
+- **Cost check**: Uses the OCI Usage API to get month-to-date spend vs your budget (default SGD 1.00); alerts on over-budget
+- **New charge alerts**: Compares with the last run and tells you how much the bill grew
+- **Auto-stop**: Stops any RUNNING paid-shape instance (e.g. E5/E4/E3 Flex) automatically — STOP only, never terminate, so you can start it again. Always Free shapes (A1.Flex, E2.1.Micro) and servers in the protection list are never touched
+- **Free-tier allowance check**: Warns when A1 exceeds 4 OCPU / 24 GB or E2.1.Micro exceeds 2 instances (overage is billable)
+- **Multi-account**: Supports multiple Oracle accounts (one OCI profile each)
+
+On alerts or check failures, it sends an encrypted Bark push to your phone. Otherwise it stays silent and just prints a JSON report to stdout.
+
+### Setup
+
+```bash
+pip install oci
+```
+
+1. Generate an OCI API key pair in the Oracle console, add the public key to your account (User Settings → API Keys), and write `~/.oci/config` (one profile per account) following the [official OCI docs](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm)
+2. Edit the config section at the top of the script: your profiles, account names, budget, and protection list (display names of important servers)
+3. (Optional) For Bark alerts, save your Bark push URL to a `bark_url` file and your 32-char encryption key to a `bark_key` file in the same directory as the script, `chmod 600`. Without them the script still runs — it just skips the push
+4. Add to cron to run every morning:
+
+```cron
+15 8 * * * /usr/bin/python3 /path/to/oracle_billing_monitor.py
+```
 
 ## 🏗️ How It Works
 
@@ -189,6 +217,7 @@ If you receive a "Security Monitor Test" push on your phone, you're all set. If 
 | `auto_limit.sh` | Traffic Guard: outbound traffic monitoring + auto speed-limit on overage (thresholds at the top) |
 | `vps_security_guard.sh` | Main monitoring script (CPU / mining / persistence / rkhunter) |
 | `bark_enc.sh` | Standalone encrypted Bark push script, usable in other scripts |
+| `oracle_billing_monitor.py` | Oracle Cloud billing monitor: daily cost check, over-budget alerts, auto-stops paid instances (needs `pip install oci`) |
 
 ### Using bark_enc.sh standalone
 
