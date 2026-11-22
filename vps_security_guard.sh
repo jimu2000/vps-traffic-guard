@@ -88,6 +88,7 @@ bark_enc() {
     [ -f "$ENC_KEY_FILE" ] || { echo "bark_enc: 找不到加密 Key 文件 $ENC_KEY_FILE" >&2; return 1; }
     key=$(cat "$ENC_KEY_FILE" 2>/dev/null) || return 1
     [ -n "$key" ] || return 1
+    # 每次推送生成一个全新的随机 16 位 IV
     iv=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)
     key_hex=$(printf '%s' "$key" | od -An -tx1 -v | tr -d ' \n')
     iv_hex=$(printf '%s' "$iv" | od -An -tx1 -v | tr -d ' \n')
