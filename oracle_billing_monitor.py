@@ -19,15 +19,16 @@ check failed (API error).
 Setup:
   1. pip install oci
   2. Create an OCI API key pair and add the public key to your tenancy
-     (User Settings -> API Keys), then write ~/.oci/config with one
-     profile per tenancy. See:
+     (User Settings -> API Keys). Then either paste your API config
+     into the OCI_CONFIG block at the top of this script (supports
+     multiple profiles), or write ~/.oci/config with one profile per
+     tenancy. See:
      https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm
-  3. Edit ACCOUNTS below to match your profiles and tenancy names.
-  4. (Optional) For Bark alerts, put your Bark push URL in a file named
-     bark_url and your 32-char encryption key in bark_key, both in the
-     same directory as this script, chmod 600. Without them the script
-     still runs and prints the report, just without push alerts.
-  5. Add to cron, e.g. every morning at 08:15:
+  3. Edit the config section at the top: ACCOUNTS (profiles), BUDGET_SGD,
+     NEVER_STOP_NAMES, and BARK_KEY / BARK_ENC_KEY for push alerts.
+     Without Bark keys the script still runs and prints the report,
+     just without push alerts.
+  4. Add to cron, e.g. every morning at 08:15:
      15 8 * * * /usr/bin/python3 /path/to/oracle_billing_monitor.py
 
 Config lives in the section below — edit it before first use.
@@ -43,7 +44,35 @@ import oci
 
 # ============================================================================
 # ★★★ 配置（使用前按你的账号修改）★★★
+# 所有要改的东西都在这里，改完就能用。
 # ============================================================================
+
+# ==================== OCI API 配置 ====================
+# 在 oci=begin 和 oci=end 之间放入你的 API 配置信息，支持多个配置文件。
+# 格式和 ~/.oci/config 完全一样，每个 [段名] 是一个账号。
+# 想换账号操作时，改下面 ACCOUNTS 里的 profile 名即可。
+# 留空或保持占位符时，脚本改用 ~/.oci/config 文件里的配置。
+OCI_CONFIG = """
+oci=begin
+[DEFAULT]
+user=ocid1.user.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+fingerprint=xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx
+tenancy=ocid1.tenancy.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+region=us-sanjose-1
+key_file=/root/oci_api_key.pem
+# 再加账号就照着上面复制一段，改段名即可：
+# [ACCOUNT2]
+# user=ocid1.user.oc1..yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+# fingerprint=yy:yy:yy:yy:yy:yy:yy:yy:yy:yy:yy:yy:yy:yy:yy:yy
+# tenancy=ocid1.tenancy.oc1..yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+# region=ap-singapore-1
+# key_file=/root/oci_api_key2.pem
+oci=end
+"""
+
+# OCI 配置文件路径（上面 OCI_CONFIG 留空/占位符时才用，一般不用改）。
+# 里面放的是 API 密钥、租户 OCID、指纹等，格式见脚本开头 docstring 里的官方文档链接。
+CONFIG_FILE = os.path.expanduser("~/.oci/config")
 
 # --- 账单与预算 ---
 # 每月预算。超过即报警。按你的需要改。
@@ -59,17 +88,13 @@ CURRENCY = "SGD"
 DELTA_THRESHOLD = 0.01
 
 # --- 要监控的账号 ---
-# 每项对应 ~/.oci/config 里的一个 profile。
-# profile 是 config 文件里的 [段名]，name 只用于报告显示，随便起。
+# 每项对应上面 OCI_CONFIG 或 ~/.oci/config 里的一个 profile（[段名]）。
+# name 只用于报告显示，随便起。
 # 只有一个账号就删掉第二项；更多账号就照着加。
 ACCOUNTS = [
     {"profile": "DEFAULT", "name": "my-tenancy-1"},
     # {"profile": "ACCOUNT2", "name": "my-tenancy-2"},
 ]
-
-# OCI 配置文件路径（标准位置，一般不用改）。
-# 里面放的是 API 密钥、租户 OCID、指纹等，格式见脚本开头 docstring 里的官方文档链接。
-CONFIG_FILE = os.path.expanduser("~/.oci/config")
 
 # --- 自动停机保护 ---
 # 永不自动停机的实例显示名（display name）。即使某天分类逻辑误判，
@@ -87,6 +112,21 @@ A1_OCPU_LIMIT = 4    # A1.Flex 免费 OCPU 上限
 A1_MEM_LIMIT = 24    # A1.Flex 免费内存上限（GB）
 E2_COUNT_LIMIT = 2   # E2.1.Micro 免费台数上限
 
+# --- Bark 推送（报警发到手机）---
+# Bark 设备 Key：Bark App 首页显示的那串，把 xxxxxxxxx 换成你的。
+BARK_KEY = "xxxxxxxxx"
+
+# Bark 加密 Key：32 位，必须和 Bark App 加密设置里的 Key 一致。
+# 没开 Bark 加密时留空字符串 "" 也可以，但推送就是明文的了。
+BARK_ENC_KEY = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Bark 服务器地址：自建 Bark 服务端才改，默认官方服务器。
+BARK_SERVER = "https://api.day.app"
+
+# Bark 推送的标题和分组名。想在手机上区分不同脚本的推送，改这里。
+BARK_TITLE = "Oracle 账单预警"
+BARK_GROUP = "oracle-billing"
+
 # --- 文件保存位置 ---
 # 状态文件与库存报告的保存目录：默认脚本所在目录。
 # 也可用环境变量 ORACLE_BILLING_DIR 覆盖。
@@ -95,15 +135,10 @@ BASE = os.environ.get(
     os.path.dirname(os.path.abspath(__file__)),
 )
 
-# --- Bark 推送（报警发到手机）---
-# Bark 推送 URL 与加密 Key 所在文件（与脚本同目录，chmod 600）。
-# 没有这两个文件时脚本照常运行，只是不发推送。
+# 备用：BARK_KEY 仍是占位符时，改读这两个外部文件（与脚本同目录，chmod 600）。
+# 两个文件分别是 Bark 推送 URL 全串和 32 位加密 Key。两种方式填一种就行。
 BARK_URL_FILE = os.path.join(BASE, "bark_url")
 BARK_KEY_FILE = os.path.join(BASE, "bark_key")
-
-# Bark 推送的标题和分组名。想在手机上区分不同脚本的推送，改这里。
-BARK_TITLE = "Oracle 账单预警"
-BARK_GROUP = "oracle-billing"
 
 # ============================================================================
 # 以下不用改（由上面配置推导出来）
@@ -113,23 +148,64 @@ STATE_FILE = os.path.join(BASE, "state.json")
 INVENTORY_FILE = os.path.join(BASE, "inventory.json")
 
 
+def _is_placeholder(value):
+    """True if a config value still looks like a placeholder."""
+    return not value or "xxxx" in str(value).lower()
+
+
+def load_oci_config(profile):
+    """Load OCI config for a profile.
+    Priority: inline OCI_CONFIG block > ~/.oci/config file.
+    Returns a dict suitable for OCI SDK clients."""
+    import configparser
+
+    text = OCI_CONFIG.strip()
+    lines = [
+        ln for ln in text.splitlines()
+        if ln.strip() not in ("oci=begin", "oci=end")
+    ]
+    # 注意：configparser 默认把 [DEFAULT] 当特殊段（默认值段），
+    # 必须改 default_section，[DEFAULT] 才能当普通 profile 解析。
+    parser = configparser.ConfigParser(
+        default_section="__oci_no_defaults__", interpolation=None
+    )
+    try:
+        parser.read_string("\n".join(lines))
+    except configparser.Error:
+        parser = None
+    if parser is not None and parser.has_section(profile):
+        cfg = dict(parser[profile])
+        if not _is_placeholder(cfg.get("user", "")) and not _is_placeholder(
+            cfg.get("fingerprint", "")
+        ):
+            return cfg
+    return oci.config.from_file(CONFIG_FILE, profile)
+
+
 def send_bark(title, body):
     """Send an encrypted Bark push (AES-256-CBC). Returns (ok, error).
+    Priority: inline BARK_KEY / BARK_ENC_KEY > bark_url / bark_key files.
     Never logs the URL/key."""
     import base64
     import secrets
     import string
     import subprocess
 
-    try:
-        with open(BARK_URL_FILE) as f:
-            url = f.read().strip()
-        with open(BARK_KEY_FILE) as f:
-            enc_key = f.read().strip()
-    except FileNotFoundError:
+    url = None
+    enc_key = None
+    if not _is_placeholder(BARK_KEY):
+        url = f"{BARK_SERVER.rstrip('/')}/{BARK_KEY}/"
+        enc_key = BARK_ENC_KEY
+    if url is None or _is_placeholder(enc_key):
+        try:
+            with open(BARK_URL_FILE) as f:
+                url = f.read().strip()
+            with open(BARK_KEY_FILE) as f:
+                enc_key = f.read().strip()
+        except FileNotFoundError:
+            return False, "bark url/key not configured"
+    if not url or _is_placeholder(enc_key):
         return False, "bark url/key not configured"
-    if not url or not enc_key:
-        return False, "bark url/key empty"
     alphabet = string.ascii_letters + string.digits
     iv = "".join(secrets.choice(alphabet) for _ in range(16))
     payload = json.dumps(
@@ -182,7 +258,7 @@ def get_mtd_cost(usage_client, tenancy_id, start, end):
 
 def check_account(acct, now):
     profile = acct["profile"]
-    config = oci.config.from_file(CONFIG_FILE, profile)
+    config = load_oci_config(profile)
     tenancy_id = config["tenancy"]
     identity = oci.identity.IdentityClient(config)
     usage = oci.usage_api.UsageapiClient(config)
