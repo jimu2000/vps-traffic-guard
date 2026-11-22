@@ -45,10 +45,21 @@ import oci
 # ★★★ 配置（使用前按你的账号修改）★★★
 # ============================================================================
 
-# 每月预算（新加坡元）。超过即报警。按你的需要改。
+# --- 账单与预算 ---
+# 每月预算。超过即报警。按你的需要改。
+# 注意单位要和下面的 CURRENCY 一致（新加坡账号一般是 SGD，美国账号一般是 USD）。
 BUDGET_SGD = 1.00
 
-# 要监控的账号：每项对应 ~/.oci/config 里的一个 profile。
+# 账单货币：新加坡账号填 "SGD"，美国账号填 "USD"，其他地区按你的账单货币填。
+# 报警消息里的金额单位都用这个。
+CURRENCY = "SGD"
+
+# 费用新增多少才报警（单位同上）。本月费用比上次检查新增超过这个数就推送。
+# 例：想有任何新增就报警，改成 0；想只在新增超过 1 元时报警，改成 1。
+DELTA_THRESHOLD = 0.01
+
+# --- 要监控的账号 ---
+# 每项对应 ~/.oci/config 里的一个 profile。
 # profile 是 config 文件里的 [段名]，name 只用于报告显示，随便起。
 # 只有一个账号就删掉第二项；更多账号就照着加。
 ACCOUNTS = [
@@ -56,6 +67,11 @@ ACCOUNTS = [
     # {"profile": "ACCOUNT2", "name": "my-tenancy-2"},
 ]
 
+# OCI 配置文件路径（标准位置，一般不用改）。
+# 里面放的是 API 密钥、租户 OCID、指纹等，格式见脚本开头 docstring 里的官方文档链接。
+CONFIG_FILE = os.path.expanduser("~/.oci/config")
+
+# --- 自动停机保护 ---
 # 永不自动停机的实例显示名（display name）。即使某天分类逻辑误判，
 # 这些实例也不会被停。把你重要的服务器名填进来。
 NEVER_STOP_NAMES = {
@@ -63,6 +79,15 @@ NEVER_STOP_NAMES = {
     "my-important-server-2",
 }
 
+# Always Free 规格（永不自动停机）。Oracle 如果新增免费规格，把名字加进来。
+FREE_SHAPES = {"VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"}
+
+# Always Free 额度上限（超出部分会收费）。Oracle 如果调整免费额度，按新标准改。
+A1_OCPU_LIMIT = 4    # A1.Flex 免费 OCPU 上限
+A1_MEM_LIMIT = 24    # A1.Flex 免费内存上限（GB）
+E2_COUNT_LIMIT = 2   # E2.1.Micro 免费台数上限
+
+# --- 文件保存位置 ---
 # 状态文件与库存报告的保存目录：默认脚本所在目录。
 # 也可用环境变量 ORACLE_BILLING_DIR 覆盖。
 BASE = os.environ.get(
@@ -70,27 +95,22 @@ BASE = os.environ.get(
     os.path.dirname(os.path.abspath(__file__)),
 )
 
+# --- Bark 推送（报警发到手机）---
 # Bark 推送 URL 与加密 Key 所在文件（与脚本同目录，chmod 600）。
 # 没有这两个文件时脚本照常运行，只是不发推送。
 BARK_URL_FILE = os.path.join(BASE, "bark_url")
 BARK_KEY_FILE = os.path.join(BASE, "bark_key")
 
-# OCI 配置文件路径（标准位置，一般不用改）。
-CONFIG_FILE = os.path.expanduser("~/.oci/config")
+# Bark 推送的标题和分组名。想在手机上区分不同脚本的推送，改这里。
+BARK_TITLE = "Oracle 账单预警"
+BARK_GROUP = "oracle-billing"
 
 # ============================================================================
-# 以下一般不用改
+# 以下不用改（由上面配置推导出来）
 # ============================================================================
 
 STATE_FILE = os.path.join(BASE, "state.json")
 INVENTORY_FILE = os.path.join(BASE, "inventory.json")
-
-# Always Free 规格（永不自动停机）。
-FREE_SHAPES = {"VM.Standard.A1.Flex", "VM.Standard.E2.1.Micro"}
-# Always Free 额度上限（超出部分会收费）。
-A1_OCPU_LIMIT = 4
-A1_MEM_LIMIT = 24
-E2_COUNT_LIMIT = 2
 
 
 def send_bark(title, body):
@@ -113,7 +133,7 @@ def send_bark(title, body):
     alphabet = string.ascii_letters + string.digits
     iv = "".join(secrets.choice(alphabet) for _ in range(16))
     payload = json.dumps(
-        {"title": title, "body": body, "level": "active", "group": "oracle-billing"},
+        {"title": title, "body": body, "level": "active", "group": BARK_GROUP},
         ensure_ascii=False,
     )
     try:
@@ -153,7 +173,7 @@ def get_mtd_cost(usage_client, tenancy_id, start, end):
     )
     resp = usage_client.request_summarized_usages(details)
     total = 0.0
-    currency = "SGD"
+    currency = CURRENCY
     for item in resp.data.items or []:
         total += item.computed_amount or 0.0
         currency = item.currency or currency
@@ -310,9 +330,9 @@ def main():
                 report["alerts"].append(
                     f"[{res['name']}] 发现付费实例在跑但未停（在保护名单）: {p['name']} ({p['shape']}, {p['region']})"
                 )
-        if delta is not None and delta > 0.01:
+        if delta is not None and delta > DELTA_THRESHOLD:
             report["alerts"].append(
-                f"[{res['name']}] 本月费用新增 SGD {delta}，当前 SGD {res['mtd_cost']}（预算 SGD {BUDGET_SGD}）"
+                f"[{res['name']}] 本月费用新增 {CURRENCY} {delta}，当前 {CURRENCY} {res['mtd_cost']}（预算 {CURRENCY} {BUDGET_SGD}）"
             )
         if res["free_over"]:
             for f in res["free_over"]:
@@ -325,11 +345,11 @@ def main():
         for e in report["errors"]:
             lines.append(f"[{e['account']}] 检查失败: {e['error']}")
         summary_lines = [
-            f"{a['name']}: 本月 SGD {a['mtd_cost']} (预算 {BUDGET_SGD})"
+            f"{a['name']}: 本月 {CURRENCY} {a['mtd_cost']} (预算 {BUDGET_SGD})"
             for a in report["accounts"]
         ]
         body = "\n".join(lines[:6] + [""] + summary_lines)
-        bark_sent, bark_error = send_bark("Oracle 账单预警", body)
+        bark_sent, bark_error = send_bark(BARK_TITLE, body)
     report["bark_sent"] = bark_sent
     report["bark_error"] = bark_error
 
