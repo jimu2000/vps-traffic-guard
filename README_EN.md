@@ -10,7 +10,7 @@ A lightweight VPS security monitoring script: **traffic monitoring + anti-mining
 
 | Traffic overage | Mining detected | Oracle billing (real screenshot) |
 |-----------------|-----------------|----------------------------------|
-| ![Traffic overage alert](docs/img/bark-traffic-alert.svg) | ![Mining detected alert](docs/img/bark-mining-alert.svg) | ![Oracle billing alert, real screenshot](docs/img/bark-oracle-real.jpg) |
+| <img src="docs/img/bark-traffic-alert.svg" width="350"> | <img src="docs/img/bark-mining-real.jpg" width="350"> | <img src="docs/img/bark-oracle-real.jpg" width="350"> |
 
 ## ✨ Features
 

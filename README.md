@@ -10,7 +10,7 @@
 
 | 流量超限 | 挖矿检测 | Oracle 账单（实拍） |
 |----------|----------|---------------------|
-| ![流量超限报警](docs/img/bark-traffic-alert.svg) | ![挖矿检测报警](docs/img/bark-mining-alert.svg) | ![Oracle 账单报警实拍](docs/img/bark-oracle-real.jpg) |
+| <img src="docs/img/bark-traffic-alert.svg" width="350"> | <img src="docs/img/bark-mining-real.jpg" width="350"> | <img src="docs/img/bark-oracle-real.jpg" width="350"> |
 
 ## ✨ 功能
 
