@@ -16,7 +16,7 @@ A lightweight VPS security monitoring script: **traffic monitoring + anti-mining
 
 | Check | Purpose | Trigger |
 |-------|---------|---------|
-| **Traffic monitoring** | Anti-overage | Outbound traffic hits 10GB / 20GB → reminder; hits 200GB → auto speed-limit to 200KB/s (all thresholds at the top of the script, just change the numbers) |
+| **Traffic monitoring** | Anti-overage | Outbound traffic hits 10GB / 20GB → reminder; hits 200GB → handled per `OVER_LIMIT_MODE`: 0=block/disconnect (iptables circuit breaker, SSH escape port kept open), 1=speed-limit to 200KB/s and stay online (all thresholds at the top of the script, just change the numbers) |
 | **CPU / process anomaly** | Anti-mining | A non-whitelisted process uses > 50% CPU for 10+ minutes, or 1-min load > 2× CPU cores for 10+ minutes |
 | **Mining connections** | Anti-mining | Outbound connection to a known mining pool port (3333 / 4444 / 5555 / 7777 / 9999 / 14433 / 14444 / 45700, etc.) |
 | **Persistence baseline** | Anti-intrusion | Changes to crontab, `/etc/cron.d`, enabled systemd services, or `authorized_keys` |
