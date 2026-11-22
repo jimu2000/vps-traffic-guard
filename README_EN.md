@@ -2,7 +2,7 @@
 
 [中文](README.md) | English
 
-A lightweight VPS security monitoring script: cryptomining detection, persistence monitoring, and rootkit scanning — with **end-to-end encrypted Bark push notifications** to your iPhone when something goes wrong.
+A lightweight VPS security monitoring script: **traffic monitoring + anti-mining + persistence detection + rootkit scanning** — with **end-to-end encrypted Bark push notifications** to your iPhone when something goes wrong.
 
 > Battle-tested on 6 production VPS instances. Runs fine even on a 1-core, 1GB box.
 
@@ -10,6 +10,7 @@ A lightweight VPS security monitoring script: cryptomining detection, persistenc
 
 | Check | Purpose | Trigger |
 |-------|---------|---------|
+| **Traffic monitoring** | Anti-overage | Outbound traffic hits 10GB / 20GB → reminder; hits 200GB → auto speed-limit to 200KB/s (all thresholds at the top of the script, just change the numbers) |
 | **CPU / process anomaly** | Anti-mining | A non-whitelisted process uses > 50% CPU for 10+ minutes, or 1-min load > 2× CPU cores for 10+ minutes |
 | **Mining connections** | Anti-mining | Outbound connection to a known mining pool port (3333 / 4444 / 5555 / 7777 / 9999 / 14433 / 14444 / 45700, etc.) |
 | **Persistence baseline** | Anti-intrusion | Changes to crontab, `/etc/cron.d`, enabled systemd services, or `authorized_keys` |
@@ -20,6 +21,36 @@ A lightweight VPS security monitoring script: cryptomining detection, persistenc
 **Container-aware**: In LXC / Docker containers, `/proc/loadavg` reflects the host's load (the kernel doesn't isolate loadavg), so the script auto-detects container environments and skips the load check to avoid false positives. Per-process CPU checks use `ps` (visible inside containers) and are unaffected.
 
 **Encrypted push**: Every alert is encrypted locally with AES-256-CBC (fresh random IV each time). Only your Bark app can decrypt it, so server details never leak through the push provider.
+
+## 📊 Traffic Monitoring (auto_limit.sh)
+
+### Thresholds (all at the top of the script, just change the numbers)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `LIMIT_10GB` | 10 | Push a reminder when outbound traffic reaches 10GB (reminder only, no throttling) |
+| `LIMIT_20GB` | 20 | Push a reminder when outbound traffic reaches 20GB (reminder only, no throttling) |
+| `LIMIT_GB` | 200 | Auto speed-limit + push an alert when outbound traffic reaches 200GB |
+| `RATE_LIMIT` | 1600kbit | Speed limit target, ≈ 200 KB/s |
+
+To get reminders at 5GB and 50GB instead, just change `LIMIT_10GB` to 5 and `LIMIT_20GB` to 50.
+
+### Automatic NIC detection
+
+The script first reads the NIC from the default route (most accurate). If that fails, it tries common NIC names in order: `eth0`, `ens3`, `ens5`, `enp0s3`, `enp1s0`, `venet0`. If none works, it exits and logs the failure — no incorrect actions.
+
+### Speed limit ≠ disconnection
+
+When the limit triggers, the server just gets slower (default 200 KB/s). **SSH still works — you won't lock yourself out.** To restore full speed:
+
+```bash
+tc qdisc del dev <interface> root
+```
+
+### Traffic counting notes
+
+- Only **outbound traffic** (tx_bytes) is counted; inbound is ignored.
+- The counter is cumulative since the NIC came up and **resets on reboot**. If your VPS bills monthly, reboot on the 1st of each month to align (or reset the counter manually).
 
 ## 🏗️ How It Works
 
@@ -55,10 +86,15 @@ flowchart TD
 ### 2. Install
 
 ```bash
-# Download the script
+# Download the security monitor script
 curl -sSL -o /usr/local/bin/vps_security_guard.sh \
   https://raw.githubusercontent.com/jimu2000/vps-traffic-guard/main/vps_security_guard.sh
 chmod +x /usr/local/bin/vps_security_guard.sh
+
+# Download the traffic guard script
+curl -sSL -o /root/auto_limit.sh \
+  https://raw.githubusercontent.com/jimu2000/vps-traffic-guard/main/auto_limit.sh
+chmod +x /root/auto_limit.sh
 
 # Install rkhunter (for weekly rootkit scans)
 apt update && apt install -y rkhunter
@@ -109,11 +145,14 @@ echo "ALLOWHIDDENDIR=/dev/.lxd-mounts" >> /etc/rkhunter.conf
 crontab -e
 ```
 
-Add these two lines:
+Add these three lines:
 
 ```cron
 # Routine check every 10 minutes (CPU / mining connections / persistence)
 */10 * * * * /usr/local/bin/vps_security_guard.sh >> /var/log/vps_security_guard.log 2>&1
+
+# Traffic check every 10 minutes (Traffic Guard)
+*/10 * * * * /bin/bash /root/auto_limit.sh
 
 # Weekly rkhunter scan, Sunday 03:00
 0 3 * * 0 /usr/local/bin/vps_security_guard.sh --rkhunter >> /var/log/vps_security_guard_rkhunter.log 2>&1
@@ -131,6 +170,7 @@ If you receive a "Security Monitor Test" push on your phone, you're all set. If 
 
 | File | Description |
 |------|-------------|
+| `auto_limit.sh` | Traffic Guard: outbound traffic monitoring + auto speed-limit on overage (thresholds at the top) |
 | `vps_security_guard.sh` | Main monitoring script (CPU / mining / persistence / rkhunter) |
 | `bark_enc.sh` | Standalone encrypted Bark push script, usable in other scripts |
 

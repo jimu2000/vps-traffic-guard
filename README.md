@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 中文
 
-轻量级 VPS 安全监控脚本：防挖矿、持久化检测、rootkit 扫描，异常时通过**加密 Bark 推送**第一时间通知到你的 iPhone。
+轻量级 VPS 安全监控脚本：**流量监控 + 防挖矿 + 持久化检测 + rootkit 扫描**，异常时通过**加密 Bark 推送**第一时间通知到你的 iPhone。
 
 > 部署在 6 台生产 VPS 上实测运行，单核 1GB 小鸡也能轻松带动。
 
@@ -10,6 +10,7 @@
 
 | 检查 | 说明 | 触发条件 |
 |------|------|----------|
+| **流量监控** | 防超流量 | 出站流量达到 10GB / 20GB 时提醒，达到 200GB 时自动限速到 200KB/s（阈值都在脚本顶部，改数字就能用） |
 | **CPU / 进程异常** | 防挖矿 | 单个非白名单进程 CPU > 50% 持续 10 分钟，或 1 分钟负载 > 2×核数持续 10 分钟 |
 | **挖矿连接** | 防挖矿 | 发现到矿池端口（3333 / 4444 / 5555 / 7777 / 9999 / 14433 / 14444 / 45700 等）的出站连接 |
 | **持久化基线** | 防入侵 | crontab、`/etc/cron.d`、systemd 启用服务、`authorized_keys` 发生变化 |
@@ -20,6 +21,36 @@
 **容器适配**：LXC / Docker 等容器里 `/proc/loadavg` 反映的是宿主机负载（内核不隔离 loadavg），脚本会自动检测容器环境并跳过负载检查，避免误报。单进程 CPU 检查用 `ps`（容器内可见），不受影响。
 
 **加密推送**：所有报警内容在本地用 AES-256-CBC 加密（每次随机 IV），只有你的 Bark App 能解密，即使推送经过第三方服务器也不会泄露服务器信息。
+
+## 📊 流量监控说明（auto_limit.sh）
+
+### 阈值配置（都在脚本顶部，改数字就能用）
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `LIMIT_10GB` | 10 | 出站流量到 10GB 时推送一次提醒（只提醒，不限速） |
+| `LIMIT_20GB` | 20 | 出站流量到 20GB 时推送一次提醒（只提醒，不限速） |
+| `LIMIT_GB` | 200 | 出站流量到 200GB 时自动限速 + 推送报警 |
+| `RATE_LIMIT` | 1600kbit | 限速目标，约 200 KB/s |
+
+想改成 5GB 提醒、50GB 提醒，直接把 `LIMIT_10GB` 改成 5、`LIMIT_20GB` 改成 50 就行。
+
+### 网卡自动识别
+
+脚本优先从默认路由获取网卡名（最准确），如果获取失败，按常见网卡名依次尝试：`eth0`、`ens3`、`ens5`、`enp0s3`、`enp1s0`、`venet0`。全部失败则退出并写日志，不会误操作。
+
+### 限速 ≠ 断网
+
+触发限速后，服务器只是变慢（默认 200 KB/s），**SSH 照常能连，不会把自己锁在外面**。想恢复全速，执行：
+
+```bash
+tc qdisc del dev <网卡名> root
+```
+
+### 流量统计说明
+
+- 只统计**出站流量**（tx_bytes），入站不计。
+- 统计值来自网卡启动以来的累计值，**服务器重启后清零**。如果你的 VPS 按自然月计费，每月 1 号重启一次服务器即可对齐（或手动重置统计）。
 
 ## 🏗️ 工作原理
 
@@ -55,10 +86,15 @@ flowchart TD
 ### 2. 安装
 
 ```bash
-# 下载脚本
+# 下载安全监控脚本
 curl -sSL -o /usr/local/bin/vps_security_guard.sh \
   https://raw.githubusercontent.com/jimu2000/vps-traffic-guard/main/vps_security_guard.sh
 chmod +x /usr/local/bin/vps_security_guard.sh
+
+# 下载流量卫士脚本
+curl -sSL -o /root/auto_limit.sh \
+  https://raw.githubusercontent.com/jimu2000/vps-traffic-guard/main/auto_limit.sh
+chmod +x /root/auto_limit.sh
 
 # 安装 rkhunter（用于每周 rootkit 扫描）
 apt update && apt install -y rkhunter
@@ -109,11 +145,14 @@ echo "ALLOWHIDDENDIR=/dev/.lxd-mounts" >> /etc/rkhunter.conf
 crontab -e
 ```
 
-添加以下两行：
+添加以下三行：
 
 ```cron
 # 每 10 分钟常规检查（CPU / 挖矿连接 / 持久化）
 */10 * * * * /usr/local/bin/vps_security_guard.sh >> /var/log/vps_security_guard.log 2>&1
+
+# 每 10 分钟流量检查（流量卫士）
+*/10 * * * * /bin/bash /root/auto_limit.sh
 
 # 每周日凌晨 3 点 rkhunter 扫描
 0 3 * * 0 /usr/local/bin/vps_security_guard.sh --rkhunter >> /var/log/vps_security_guard_rkhunter.log 2>&1
@@ -131,6 +170,7 @@ crontab -e
 
 | 文件 | 说明 |
 |------|------|
+| `auto_limit.sh` | 流量卫士：出站流量监控 + 超限自动限速（阈值在脚本顶部） |
 | `vps_security_guard.sh` | 主监控脚本（CPU / 挖矿 / 持久化 / rkhunter） |
 | `bark_enc.sh` | 独立的 Bark 加密推送脚本，可在其他脚本里调用 |
 
