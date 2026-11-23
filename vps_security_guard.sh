@@ -231,41 +231,160 @@ baseline_check() {
     return 1
 }
 
+# 已知良性的持久化内容（我们自己的工具）：返回 0=良性
+is_known_good_text() {
+    local text="$1"
+    printf '%s' "$text" | grep -qiE \
+        -e 'acme\.sh' \
+        -e 'oracle_traffic_(guard|ultimate)\.py' \
+        -e 'auto_limit\.sh' \
+        -e 'vps_security_guard\.sh' \
+        -e 'mail_forwarder\.py' \
+        -e 'xray-auto-update\.sh' \
+        -e 'nginx-auto-update\.sh' \
+        -e 'rbot-clone' \
+        -e 'r_client' \
+        -e 'rkhunter' \
+        -e 'unattended-upgrade' \
+        -e 'vnstat' \
+        -e 'certbot' \
+        -e 'letsencrypt' \
+        && return 0
+    return 1
+}
+
+# 可疑特征：返回 0=可疑，1=无可疑特征
+# 覆盖：临时目录/隐藏路径执行、下载即执行、编码执行、挖矿特征、编码命令。
+is_suspicious_text() {
+    local text="$1"
+    printf '%s' "$text" | grep -qiE \
+        -e '/tmp/' -e '/dev/shm' -e '/var/tmp' \
+        -e 'curl[^|]*\|[[:space:]]*(sh|bash|dash)' \
+        -e 'wget[^|]*\|[[:space:]]*(sh|bash|dash)' \
+        -e 'base64[[:space:]]+(-d|--decode)[^|]*\|[[:space:]]*(sh|bash)' \
+        -e 'xmrig|minerd|cryptonight|monero|stratum\+tcp|nicehash' \
+        -e ':(3333|4444|5555|7777|9000|14444|20580)\b' \
+        -e 'eval[[:space:]]+\$\(' \
+        -e 'python[0-9.]*[[:space:]]+-c[[:space:]]+["'"'"']' \
+        -e 'perl[[:space:]]+-e[[:space:]]+["'"'"']' \
+        -e 'nc[[:space:]]+-[el]+' \
+        && return 0
+    return 1
+}
+
+# 新增 systemd 服务：查它的 ExecStart 再判（只看服务名看不出跑什么）。
+# 返回 0=可疑，1=良性。
+check_new_service() {
+    local unit="$1" exec_line unit_file
+    exec_line=$(systemctl show "$unit" -p ExecStart -p ExecStartPre 2>/dev/null \
+        | grep -v '^ExecStart=$' | grep -v '^ExecStartPre=$' | head -5)
+    [ -z "$exec_line" ] && exec_line=$(systemctl cat "$unit" 2>/dev/null \
+        | grep -E '^ExecStart' | head -5)
+    # 单元文件不在常规目录（/etc 或 /lib 下的 systemd）→ 可疑
+    unit_file=$(systemctl show "$unit" -p FragmentPath 2>/dev/null | cut -d= -f2)
+    case "$unit_file" in
+        /etc/systemd/system/*|/lib/systemd/system/*|/usr/lib/systemd/system/*) ;;
+        *) [ -n "$unit_file" ] && return 0 ;;
+    esac
+    [ -z "$exec_line" ] && return 1
+    is_known_good_text "$exec_line" && return 1
+    is_suspicious_text "$exec_line"
+}
+
 check_persistence() {
-    local changed="" content rc all_content sig sig_file
-    content=$(crontab -l 2>/dev/null || echo "(no crontab)")
-    baseline_check "crontab.txt" "$content"; rc=$?
+    local changed="" rc sig sig_file
+    local cron_content crond_content systemd_content auth_content
+    local added="" removed="" detail="" suspicious=0
+    local f new_units unit
+
+    cron_content=$(crontab -l 2>/dev/null || echo "(no crontab)")
+    baseline_check "crontab.txt" "$cron_content"; rc=$?
     [ "$rc" -eq 1 ] && changed="$changed crontab"
-    all_content="CRON:$content"
-    content=$(find /etc/cron.d -type f -exec sha256sum {} \; 2>/dev/null | sort)
-    baseline_check "cron_d.txt" "$content"; rc=$?
+    crond_content=$(find /etc/cron.d -type f -exec sha256sum {} \; 2>/dev/null | sort)
+    baseline_check "cron_d.txt" "$crond_content"; rc=$?
     [ "$rc" -eq 1 ] && changed="$changed cron.d"
-    all_content="$all_content|CROND:$content"
-    content=$(systemctl list-unit-files --type=service --state=enabled --no-legend --no-pager 2>/dev/null | sort)
-    baseline_check "systemd.txt" "$content"; rc=$?
+    systemd_content=$(systemctl list-unit-files --type=service --state=enabled --no-legend --no-pager 2>/dev/null | sort)
+    baseline_check "systemd.txt" "$systemd_content"; rc=$?
     [ "$rc" -eq 1 ] && changed="$changed systemd"
-    all_content="$all_content|SYSTEMD:$content"
-    content=$(cat /root/.ssh/authorized_keys 2>/dev/null || echo "(no authorized_keys)")
-    baseline_check "authorized_keys.txt" "$content"; rc=$?
+    auth_content=$(cat /root/.ssh/authorized_keys 2>/dev/null || echo "(no authorized_keys)")
+    baseline_check "authorized_keys.txt" "$auth_content"; rc=$?
     [ "$rc" -eq 1 ] && changed="$changed authorized_keys"
-    all_content="$all_content|AUTHKEYS:$content"
+
+    [ -z "$changed" ] && return 0
+
+    # ---- 提取新增/删除行，逐项判定是否异常 ----
+    case "$changed" in
+        *crontab*)
+            added=$(printf '%s\n' "$cron_content" \
+                | diff "$BASELINE_DIR/crontab.txt" - 2>/dev/null | grep '^> ' | sed 's/^> //')
+            removed=$(printf '%s\n' "$cron_content" \
+                | diff "$BASELINE_DIR/crontab.txt" - 2>/dev/null | grep '^< ' | sed 's/^< //')
+            detail="$detail[crontab 新增] $added "
+            ;;
+    esac
+    case "$changed" in
+        *cron.d*)
+            # cron.d 基线是哈希列表：找出新增/变化的文件，读内容再判
+            f=$(printf '%s\n' "$crond_content" \
+                | diff "$BASELINE_DIR/cron_d.txt" - 2>/dev/null | grep '^> ' | awk '{print $3}')
+            added="$added $(for x in $f; do [ -f "$x" ] && cat "$x"; done 2>/dev/null)"
+            detail="$detail[cron.d 变化文件] $f $added "
+            ;;
+    esac
+    case "$changed" in
+        *systemd*)
+            new_units=$(printf '%s\n' "$systemd_content" \
+                | diff "$BASELINE_DIR/systemd.txt" - 2>/dev/null | grep '^> ' | awk '{print $1}')
+            removed="$removed $(printf '%s\n' "$systemd_content" \
+                | diff "$BASELINE_DIR/systemd.txt" - 2>/dev/null | grep '^< ' | awk '{print $1}')"
+            detail="$detail[systemd 新增] $new_units "
+            for unit in $new_units; do
+                if check_new_service "$unit"; then
+                    suspicious=1
+                    detail="$detail[可疑服务 $unit] $(systemctl show "$unit" -p ExecStart 2>/dev/null | head -1) "
+                fi
+            done
+            # 安全服务被移除 = 有人在关防御，直接判可疑
+            printf '%s' "$removed" | grep -qiE 'crowdsec|fail2ban|ufw|security_guard|rkhunter' && suspicious=1
+            ;;
+    esac
+    case "$changed" in
+        *authorized_keys*)
+            # 新 SSH 公钥一律判可疑（可能是后门），必须人工确认
+            suspicious=1
+            detail="$detail[authorized_keys 变化] 请核对新增公钥 "
+            ;;
+    esac
+    # 新增的 cron 内容：先过白名单，再查可疑特征
+    if [ -n "$added" ]; then
+        if ! is_known_good_text "$added" && is_suspicious_text "$added"; then
+            suspicious=1
+        fi
+    fi
+    # 被删除的 cron 里有安全监控脚本 = 有人在关监控
+    printf '%s' "$removed" | grep -qiE 'security_guard|rkhunter|fail2ban|crowdsec' && suspicious=1
 
     sig_file="$STATE_DIR/persist_sig"
-    if [ -n "$changed" ]; then
-        sig=$(printf '%s' "$all_content" | sha256sum | cut -d' ' -f1)
+    if [ "$suspicious" -eq 1 ]; then
+        # 异常：推送报警，附上实际变化内容；同一变化只推一次，不每天重复
+        sig=$(printf '%s' "$changed $detail" | sha256sum | cut -d' ' -f1)
         if [ ! -f "$sig_file" ] || [ "$(cat "$sig_file" 2>/dev/null)" != "$sig" ]; then
-            bark_enc "配置变化提醒" "主机 $HOST_ID ($HOST_IP)：发现持久化配置变化（$changed），请确认是否是你自己改的。如不是，请检查是否被入侵。" "alarm"
+            detail=$(printf '%s' "$detail" | tr '\n' ' ' | head -c 400)
+            bark_enc "可疑持久化变化" "主机 $HOST_ID ($HOST_IP)：发现可疑持久化变化（$changed），请检查是否被入侵。变化：$detail" "alarm"
             echo "$sig" > "$sig_file"
-            mark_alerted "persist_alerted"
-            log "持久化变化报警:$changed"
-        elif should_alert "persist_alerted" 86400; then
-            bark_enc "配置变化提醒（持续）" "主机 $HOST_ID ($HOST_IP)：持久化配置变化仍未处理（$changed），请确认。" "alarm"
-            mark_alerted "persist_alerted"
-            log "持久化变化提醒:$changed"
+            log "持久化可疑变化报警:$changed $detail"
+        else
+            log "持久化可疑变化与上次相同，不重复报警:$changed"
         fi
     else
+        # 良性变化（如自己装的新服务、新 cron）：自动采纳进基线，只记日志不推送
+        printf '%s\n' "$cron_content" > "$BASELINE_DIR/crontab.txt"
+        printf '%s\n' "$crond_content" > "$BASELINE_DIR/cron_d.txt"
+        printf '%s\n' "$systemd_content" > "$BASELINE_DIR/systemd.txt"
+        printf '%s\n' "$auth_content" > "$BASELINE_DIR/authorized_keys.txt"
         rm -f "$sig_file"
-        clear_alerted "persist_alerted"
+        echo "$(date '+%F %T') 自动采纳良性持久化变化:$changed $detail" >> "$STATE_DIR/persist_adopted.log"
+        log "持久化良性变化已自动采纳:$changed"
     fi
 }
 
